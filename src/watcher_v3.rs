@@ -1,0 +1,113 @@
+use crate::device::{DeviceMap, RazerDevice};
+use anyhow::Result;
+use lazy_static::lazy_static;
+use regex::Regex;
+use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+
+lazy_static! {
+    // Regex patterns for Synapse V3 log parsing
+    static ref BATTERY_STATE_REGEX: Regex = Regex::new(
+        r"(?m)^(?P<dateTime>.+?) INFO.+?_OnBatteryLevelChanged[\s\S]*?Name: (?P<name>.*)[\s\S]*?Handle: (?P<handle>\d+)[\s\S]*?level (?P<level>\d+) state (?P<isCharging>\d+)"
+    ).unwrap();
+
+    static ref DEVICE_LOADED_REGEX: Regex = Regex::new(
+        r"(?m)^(?P<dateTime>.+?) INFO.+?_OnDeviceLoaded[\s\S]*?Name: (?P<name>.*)[\s\S]*?Handle: (?P<handle>\d+)"
+    ).unwrap();
+
+    static ref DEVICE_REMOVED_REGEX: Regex = Regex::new(
+        r"(?m)^(?P<dateTime>.+?) INFO.+?_OnDeviceRemoved[\s\S]*?Name: (?P<name>.*)[\s\S]*?Handle: (?P<handle>\d+)"
+    ).unwrap();
+}
+
+pub struct SynapseV3Watcher {
+    log_path: PathBuf,
+}
+
+impl SynapseV3Watcher {
+    pub fn new() -> Option<Self> {
+        let local_appdata = env::var("LOCALAPPDATA").ok()?;
+        let log_path = PathBuf::from(local_appdata)
+            .join("Razer")
+            .join("Synapse3")
+            .join("Log")
+            .join("Razer Synapse 3.log");
+
+        if log_path.exists() {
+            Some(Self { log_path })
+        } else {
+            None
+        }
+    }
+
+    pub fn parse_devices(&self, shown_device_handle: &str) -> Result<DeviceMap> {
+        let log_content = fs::read_to_string(&self.log_path)?;
+        let mut devices = DeviceMap::new();
+
+        // Parse battery state changes
+        let battery_matches = get_last_match_by_handle(&BATTERY_STATE_REGEX, &log_content);
+        for (handle, caps) in battery_matches {
+            let name = caps.name("name").unwrap().as_str().trim().to_string();
+            let level = caps.name("level").unwrap().as_str().parse::<u8>().unwrap_or(0);
+            let is_charging = caps.name("isCharging").unwrap().as_str() != "0";
+
+            devices.insert(
+                handle.clone(),
+                RazerDevice {
+                    name,
+                    handle: handle.clone(),
+                    battery_percentage: level,
+                    is_charging,
+                    is_connected: false,
+                    is_selected: shown_device_handle == handle || shown_device_handle.is_empty(),
+                },
+            );
+        }
+
+        // Parse connection status
+        let loaded_matches = get_last_match_by_handle_with_index(&DEVICE_LOADED_REGEX, &log_content);
+        let removed_matches = get_last_match_by_handle_with_index(&DEVICE_REMOVED_REGEX, &log_content);
+
+        for handle in loaded_matches.keys().chain(removed_matches.keys()) {
+            if let Some(device) = devices.get_mut(handle) {
+                let loaded_idx = loaded_matches.get(handle).map(|(idx, _)| *idx).unwrap_or(0);
+                let removed_idx = removed_matches.get(handle).map(|(idx, _)| *idx).unwrap_or(0);
+                device.is_connected = loaded_idx > removed_idx;
+            }
+        }
+
+        Ok(devices)
+    }
+
+    pub fn log_path(&self) -> &PathBuf {
+        &self.log_path
+    }
+}
+
+fn get_last_match_by_handle<'a>(
+    regex: &Regex,
+    text: &'a str,
+) -> HashMap<String, regex::Captures<'a>> {
+    let mut map = HashMap::new();
+    for caps in regex.captures_iter(text) {
+        if let Some(handle) = caps.name("handle") {
+            map.insert(handle.as_str().to_string(), caps);
+        }
+    }
+    map
+}
+
+fn get_last_match_by_handle_with_index<'a>(
+    regex: &Regex,
+    text: &'a str,
+) -> HashMap<String, (usize, regex::Captures<'a>)> {
+    let mut map = HashMap::new();
+    for (idx, caps) in regex.captures_iter(text).enumerate() {
+        if let Some(handle) = caps.name("handle") {
+            map.insert(handle.as_str().to_string(), (idx, caps));
+        }
+    }
+    map
+}

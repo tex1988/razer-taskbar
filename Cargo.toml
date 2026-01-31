@@ -1,0 +1,49 @@
+[package]
+name = "razer-taskbar"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# System Tray
+tray-icon = "0.14"
+image = "0.24"
+imageproc = "0.23"
+rusttype = "0.9"
+
+# File Watching
+notify = "6.1"
+notify-debouncer-full = "0.3"
+
+# Regex & Parsing
+regex = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+lazy_static = "1.4"
+
+# Windows APIs
+windows = { version = "0.52", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Console",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Controls",
+    "Win32_Graphics_Dwm",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+]}
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Utilities
+chrono = "0.4"
+dirs = "5.0"
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Enable link-time optimization
+codegen-units = 1   # Better optimization
+strip = true        # Strip symbols
