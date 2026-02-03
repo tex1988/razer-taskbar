@@ -23,6 +23,9 @@ pub struct Settings {
 
     #[serde(default = "default_synapse_version")]
     pub synapse_version: SynapseVersion,
+
+    #[serde(default)]
+    pub custom_assets_folder: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -48,6 +51,7 @@ impl Default for Settings {
             display_charging_state: default_display_charging(),
             shown_device_handle: String::new(),
             synapse_version: default_synapse_version(),
+            custom_assets_folder: None,
         }
     }
 }

@@ -23,7 +23,7 @@ impl TrayManager {
     }
 
     pub fn initialize(&mut self) -> Result<()> {
-        let icon = self.create_battery_icon(0, false)?;
+        let icon = self.create_unknown_battery_icon()?;
         let menu = self.build_menu(None)?;
 
         let tray_icon = TrayIconBuilder::new()
@@ -125,7 +125,7 @@ impl TrayManager {
                     dev.name, dev.battery_percentage, charging_text
                 )))?;
             } else {
-                let icon = self.create_battery_icon(0, false)?;
+                let icon = self.create_unknown_battery_icon()?;
                 tray_icon.set_icon(Some(icon))?;
                 tray_icon.set_tooltip(Some(TOOLTIP_NO_DEVICES))?;
             }
@@ -151,6 +151,16 @@ impl TrayManager {
         selected_devices.first().cloned()
     }
 
+    fn create_unknown_battery_icon(&self) -> Result<Icon> {
+        // Load the unknown battery icon for when no devices are found
+        let img = crate::resources::load_embedded_image("battery_unknown.png")?;
+
+        let (width, height) = img.dimensions();
+        let rgba = img.into_raw();
+
+        Ok(Icon::from_rgba(rgba, width, height)?)
+    }
+
     fn create_battery_icon(
         &self,
         percentage: u8,
@@ -169,15 +179,16 @@ impl TrayManager {
             100
         };
 
-        // Build the asset filename
-        let filename = if is_charging {
-            format!("battery{}_chrg_@2x.png", level)
-        } else {
-            format!("battery{}_@2x.png", level)
-        };
+        // Build the asset filename (always use non-charging version)
+        let filename = format!("battery{}.png", level);
 
         // Load the PNG from embedded resources
-        let img = crate::resources::load_embedded_image(&filename)?;
+        let mut img = crate::resources::load_embedded_image(&filename)?;
+
+        // Apply charging overlay if needed
+        if is_charging {
+            img = crate::resources::apply_charging_overlay(img)?;
+        }
 
         let (width, height) = img.dimensions();
         let rgba = img.into_raw();

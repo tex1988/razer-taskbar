@@ -13,7 +13,7 @@ mod watcher_v4;
 
 use anyhow::Result;
 use device::DeviceMap;
-use notify::{RecursiveMode, Watcher};
+use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 use settings::{Settings, SynapseVersion};
 use std::path::PathBuf;
@@ -82,6 +82,13 @@ fn run_app() -> Result<()> {
     let settings = Settings::load()?;
     log(&format!("Settings loaded: {:?}", settings), debug_mode);
 
+    // Initialize custom assets folder if set
+    if let Some(ref folder_path) = settings.custom_assets_folder {
+        let path = PathBuf::from(folder_path);
+        resources::set_custom_assets_folder(Some(path));
+        log(&format!("Custom assets folder set to: {}", folder_path), debug_mode);
+    }
+
     write_error_log("Applying autostart settings...");
     // Apply autostart setting (sync registry with settings)
     if let Err(e) = startup::set_startup(settings.run_at_startup) {
@@ -145,8 +152,8 @@ fn run_v3_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
         },
     )?;
 
-    debouncer.watcher().watch(&log_path, RecursiveMode::NonRecursive)?;
-    debouncer.cache().add_root(&log_path, RecursiveMode::NonRecursive);
+    // In notify 8.x, call watch directly on debouncer
+    debouncer.watch(&log_path, RecursiveMode::NonRecursive)?;
 
     loop {
         #[cfg(target_os = "windows")]
@@ -154,7 +161,7 @@ fn run_v3_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
             unsafe {
                 let mut msg = MSG::default();
                 while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                    TranslateMessage(&msg);
+                    let _ = TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
             }
@@ -174,6 +181,15 @@ fn run_v3_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
                         if changed {
                             log("Settings changed, reloading...", debug);
                             settings = Settings::load()?;
+                            
+                            // Update custom assets folder
+                            if let Some(ref folder_path) = settings.custom_assets_folder {
+                                let path = PathBuf::from(folder_path);
+                                resources::set_custom_assets_folder(Some(path));
+                            } else {
+                                resources::set_custom_assets_folder(None);
+                            }
+                            
                             // Force update to apply new icon style
                             if let Err(e) = parse_and_update_v3(&watcher, &mut tray_manager, &settings, debug) {
                                 log(&format!("Error updating after settings change: {}", e), debug);
@@ -226,7 +242,7 @@ fn run_v4_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
             unsafe {
                 let mut msg = MSG::default();
                 while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                    TranslateMessage(&msg);
+                    let _ = TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
             }
@@ -246,6 +262,15 @@ fn run_v4_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
                         if changed {
                             log("Settings changed, reloading...", debug);
                             settings = Settings::load()?;
+                            
+                            // Update custom assets folder
+                            if let Some(ref folder_path) = settings.custom_assets_folder {
+                                let path = PathBuf::from(folder_path);
+                                resources::set_custom_assets_folder(Some(path));
+                            } else {
+                                resources::set_custom_assets_folder(None);
+                            }
+                            
                             // Force update to apply new icon style
                             if let Err(e) = parse_and_update_v4(&mut watcher, &log_path, &mut tray_manager, &settings, debug) {
                                 log(&format!("Error updating after settings change: {}", e), debug);

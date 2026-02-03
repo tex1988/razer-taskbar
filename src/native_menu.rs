@@ -38,11 +38,7 @@ impl NativeContextMenu {
                 None,
                 None,
                 None,
-            );
-
-            if hwnd.0 == 0 {
-                return Err(anyhow::anyhow!("Failed to create menu window"));
-            }
+            )?;
 
             // Create popup menu
             let hmenu = CreatePopupMenu()?;
@@ -78,14 +74,14 @@ impl NativeContextMenu {
 
     pub fn show(&self, x: i32, y: i32) -> Result<()> {
         unsafe {
-            SetForegroundWindow(self.hwnd);
+            let _ = SetForegroundWindow(self.hwnd);
 
             let result = TrackPopupMenu(
                 self.hmenu,
                 TPM_LEFTALIGN | TPM_BOTTOMALIGN,
                 x,
                 y,
-                0,
+                Some(0),
                 self.hwnd,
                 None,
             );
@@ -94,7 +90,7 @@ impl NativeContextMenu {
                 return Err(anyhow::anyhow!("Failed to show menu"));
             }
 
-            PostMessageW(self.hwnd, WM_NULL, WPARAM(0), LPARAM(0))?;
+            PostMessageW(Some(self.hwnd), WM_NULL, WPARAM(0), LPARAM(0))?;
 
             Ok(())
         }
