@@ -505,8 +505,21 @@ unsafe fn enable_window(hwnd: HWND, enable: bool) {
         current_style | WS_DISABLED.0 as i32
     };
     SetWindowLongW(hwnd, GWL_STYLE, new_style);
-    // Redraw the control to reflect the new state
+
+    // For edit controls, also set/remove ES_READONLY to change visual appearance
+    let mut class_name_buf: [u16; 256] = [0; 256];
+    let len = GetClassNameW(hwnd, &mut class_name_buf);
+    if len > 0 {
+        let class_name = String::from_utf16_lossy(&class_name_buf[0..len as usize]);
+        if class_name.eq_ignore_ascii_case("Edit") {
+            // EM_SETREADONLY message (0x00CF)
+            SendMessageW(hwnd, 0x00CF, Some(WPARAM(if enable { 0 } else { 1 })), None);
+        }
+    }
+
+    // Force the control to redraw with the new state
     let _ = InvalidateRect(Some(hwnd), None, true);
+    let _ = UpdateWindow(hwnd);
 }
 
 /// Helper function to show a folder picker dialog
