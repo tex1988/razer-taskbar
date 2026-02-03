@@ -52,11 +52,11 @@ fn create_shortcut(shortcut_path: &PathBuf) -> Result<()> {
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::UI::Shell::IShellLinkW;
-    use windows::core::{GUID, ComInterface};
+    use windows::core::{GUID, Interface};
 
     unsafe {
         // Initialize COM
-        CoInitializeEx(None, COINIT_APARTMENTTHREADED)?;
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
         // CLSID for ShellLink
         let clsid = GUID::from_values(

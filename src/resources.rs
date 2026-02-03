@@ -1,5 +1,7 @@
 // Embedded resources - battery icons
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::path::PathBuf;
 use anyhow::Result;
 use image::{RgbaImage, imageops};
 use lazy_static::lazy_static;
@@ -23,9 +25,44 @@ lazy_static! {
 
         m
     };
+
+    static ref CUSTOM_ASSETS_FOLDER: Mutex<Option<PathBuf>> = Mutex::new(None);
+}
+
+/// Set the custom assets folder path
+pub fn set_custom_assets_folder(path: Option<PathBuf>) {
+    *CUSTOM_ASSETS_FOLDER.lock().unwrap() = path;
+}
+
+/// Get the custom assets folder path
+pub fn get_custom_assets_folder() -> Option<PathBuf> {
+    CUSTOM_ASSETS_FOLDER.lock().unwrap().clone()
 }
 
 pub fn load_embedded_image(filename: &str) -> Result<RgbaImage> {
+    // First, try to load from custom assets folder if set
+    if let Some(custom_folder) = get_custom_assets_folder() {
+        // For regular battery icons, look in regular-icon subfolder
+        let paths_to_try = if filename.starts_with("battery") && filename != "battery_unknown.png" {
+            vec![
+                custom_folder.join("regular-icon").join(filename),
+                custom_folder.join(filename),
+            ]
+        } else {
+            vec![custom_folder.join(filename)]
+        };
+
+        for path in paths_to_try {
+            if path.exists() {
+                match image::open(&path) {
+                    Ok(img) => return Ok(img.to_rgba8()),
+                    Err(e) => eprintln!("Failed to load custom asset {}: {}", path.display(), e),
+                }
+            }
+        }
+    }
+
+    // Fallback to embedded resources
     if let Some(bytes) = ASSET_CACHE.get(filename) {
         let img = image::load_from_memory(bytes)
             .map_err(|e| anyhow::anyhow!("Failed to decode embedded image {}: {}", filename, e))?
@@ -59,6 +96,34 @@ pub fn generate_numeric_icon(percentage: u8, is_charging: bool) -> Result<RgbaIm
     // Clamp percentage to 0-100
     let percentage = percentage.min(100);
 
+    // Build the filename for the numeric icon
+    let filename = format!("battery{:03}.png", percentage);
+
+    // First, try to load from custom assets folder if set
+    if let Some(custom_folder) = get_custom_assets_folder() {
+        let paths_to_try = vec![
+            custom_folder.join("numeric-icon").join(&filename),
+            custom_folder.join(&filename),
+        ];
+
+        for path in paths_to_try {
+            if path.exists() {
+                match image::open(&path) {
+                    Ok(img) => {
+                        let mut img = img.to_rgba8();
+                        // Apply charging overlay if needed
+                        if is_charging {
+                            img = apply_charging_overlay(img)?;
+                        }
+                        return Ok(img);
+                    }
+                    Err(e) => eprintln!("Failed to load custom numeric asset {}: {}", path.display(), e),
+                }
+            }
+        }
+    }
+
+    // Fallback to embedded numeric icons
     // Use a macro to generate the match arms for all percentages (only normal icons)
     macro_rules! include_numeric_icon {
         ($p:expr) => {
