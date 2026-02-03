@@ -3,7 +3,7 @@ use crate::ui_constants::*;
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use tray_icon::{TrayIcon, TrayIconBuilder};
 
 pub struct TrayManager {
     tray_icon: Option<TrayIcon>,
@@ -23,7 +23,7 @@ impl TrayManager {
     }
 
     pub fn initialize(&mut self) -> Result<()> {
-        let icon = self.create_unknown_battery_icon()?;
+        let icon = crate::icon_manager::load_unknown_icon()?;
         let menu = self.build_menu(None)?;
 
         let tray_icon = TrayIconBuilder::new()
@@ -92,7 +92,6 @@ impl TrayManager {
         &mut self,
         devices: DeviceMap,
         show_percentage: bool,
-        display_charging: bool,
     ) -> Result<()> {
         *self.devices.lock().unwrap() = devices.clone();
 
@@ -101,17 +100,11 @@ impl TrayManager {
         if let Some(tray_icon) = &self.tray_icon {
             // Update icon
             if let Some(ref dev) = device {
-                let icon = if show_percentage {
-                    self.create_numeric_battery_icon(
-                        dev.battery_percentage,
-                        dev.is_charging && display_charging,
-                    )?
-                } else {
-                    self.create_battery_icon(
-                        dev.battery_percentage,
-                        dev.is_charging && display_charging,
-                    )?
-                };
+                let icon = crate::icon_manager::load_icon(
+                    dev.battery_percentage,
+                    dev.is_charging,
+                    show_percentage,
+                )?;
 
                 tray_icon.set_icon(Some(icon))?;
 
@@ -125,7 +118,7 @@ impl TrayManager {
                     dev.name, dev.battery_percentage, charging_text
                 )))?;
             } else {
-                let icon = self.create_unknown_battery_icon()?;
+                let icon = crate::icon_manager::load_unknown_icon()?;
                 tray_icon.set_icon(Some(icon))?;
                 tray_icon.set_tooltip(Some(TOOLTIP_NO_DEVICES))?;
             }
@@ -149,65 +142,6 @@ impl TrayManager {
             .sort_by_key(|d| d.battery_percentage as u32 * if d.is_charging { 100 } else { 1 });
 
         selected_devices.first().cloned()
-    }
-
-    fn create_unknown_battery_icon(&self) -> Result<Icon> {
-        // Load the unknown battery icon for when no devices are found
-        let img = crate::resources::load_embedded_image("battery_unknown.png")?;
-
-        let (width, height) = img.dimensions();
-        let rgba = img.into_raw();
-
-        Ok(Icon::from_rgba(rgba, width, height)?)
-    }
-
-    fn create_battery_icon(
-        &self,
-        percentage: u8,
-        is_charging: bool,
-    ) -> Result<Icon> {
-        // Determine which asset to load based on battery level
-        let level = if percentage <= 12 {
-            0
-        } else if percentage <= 37 {
-            25
-        } else if percentage <= 62 {
-            50
-        } else if percentage <= 87 {
-            75
-        } else {
-            100
-        };
-
-        // Build the asset filename (always use non-charging version)
-        let filename = format!("battery{}.png", level);
-
-        // Load the PNG from embedded resources
-        let mut img = crate::resources::load_embedded_image(&filename)?;
-
-        // Apply charging overlay if needed
-        if is_charging {
-            img = crate::resources::apply_charging_overlay(img)?;
-        }
-
-        let (width, height) = img.dimensions();
-        let rgba = img.into_raw();
-
-        Ok(Icon::from_rgba(rgba, width, height)?)
-    }
-
-    fn create_numeric_battery_icon(
-        &self,
-        percentage: u8,
-        is_charging: bool,
-    ) -> Result<Icon> {
-        // Use generate_numeric_icon from resources module
-        let img = crate::resources::generate_numeric_icon(percentage, is_charging)?;
-
-        let (width, height) = img.dimensions();
-        let rgba = img.into_raw();
-
-        Ok(Icon::from_rgba(rgba, width, height)?)
     }
 }
 

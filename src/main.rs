@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod device;
-mod native_menu;
-mod resources;
+mod r_click_menu;
+mod icon_manager;
 mod settings;
 mod settings_window;
 mod startup;
@@ -85,7 +85,7 @@ fn run_app() -> Result<()> {
     // Initialize custom assets folder if set
     if let Some(ref folder_path) = settings.custom_assets_folder {
         let path = PathBuf::from(folder_path);
-        resources::set_custom_assets_folder(Some(path));
+        icon_manager::set_custom_assets_folder(Some(path));
         log(&format!("Custom assets folder set to: {}", folder_path), debug_mode);
     }
 
@@ -185,9 +185,9 @@ fn run_v3_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
                             // Update custom assets folder
                             if let Some(ref folder_path) = settings.custom_assets_folder {
                                 let path = PathBuf::from(folder_path);
-                                resources::set_custom_assets_folder(Some(path));
+                                icon_manager::set_custom_assets_folder(Some(path));
                             } else {
-                                resources::set_custom_assets_folder(None);
+                                icon_manager::set_custom_assets_folder(None);
                             }
                             
                             // Force update to apply new icon style
@@ -266,9 +266,9 @@ fn run_v4_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
                             // Update custom assets folder
                             if let Some(ref folder_path) = settings.custom_assets_folder {
                                 let path = PathBuf::from(folder_path);
-                                resources::set_custom_assets_folder(Some(path));
+                                icon_manager::set_custom_assets_folder(Some(path));
                             } else {
-                                resources::set_custom_assets_folder(None);
+                                icon_manager::set_custom_assets_folder(None);
                             }
                             
                             // Force update to apply new icon style
@@ -329,7 +329,6 @@ fn parse_and_update_v3(
     tray_manager.update_devices(
         devices,
         settings.show_percentage,
-        settings.display_charging_state,
     )?;
 
     Ok(())
@@ -363,7 +362,6 @@ fn parse_and_update_v4(
     tray_manager.update_devices(
         devices,
         settings.show_percentage,
-        settings.display_charging_state,
     )?;
 
     Ok(())
