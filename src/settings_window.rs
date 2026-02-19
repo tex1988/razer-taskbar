@@ -718,14 +718,15 @@ impl SettingsWindow {
         };
         SendMessageW(checkbox_percent_symbol, BM_SETCHECK, check_state, Some(LPARAM(0)));
 
-        // Create OK button (below tab control)
+        // Create OK button — centered horizontally, just below the tab control
+        // Tab control bottom = 10 + (window_height - 90) = 320; button at Y=325 with 5px gap
         CreateWindowExW(
             WINDOW_EX_STYLE::default(),
             windows::core::w!("BUTTON"),
             windows::core::w!("OK"),
             WS_VISIBLE | WS_CHILD | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32),
-            180,
-            320,
+            177,  // (client_width - button_width) / 2 = (434 - 80) / 2
+            325,
             80,
             30,
             Some(hwnd),
