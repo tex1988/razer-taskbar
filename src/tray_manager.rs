@@ -10,6 +10,9 @@ pub struct TrayManager {
     quit_id: MenuId,
     settings_id: MenuId,
     devices: Arc<Mutex<DeviceMap>>,
+    // Track previous state to avoid unnecessary updates
+    last_displayed_device: Option<(String, u8, bool)>, // (name, battery_percentage, is_charging)
+    last_icon_settings: Option<(bool, u32, String, String, String, i32, i32, bool, bool)>, // (show_percentage, text_size, text_color, font_name, text_align, text_x, text_y, show_percent_symbol, show_device_type_overlay)
 }
 
 impl TrayManager {
@@ -19,6 +22,8 @@ impl TrayManager {
             quit_id: MenuId::new("quit"),
             settings_id: MenuId::new("settings"),
             devices: Arc::new(Mutex::new(DeviceMap::new())),
+            last_displayed_device: None,
+            last_icon_settings: None,
         })
     }
 
@@ -88,44 +93,96 @@ impl TrayManager {
         self.settings_id.clone()
     }
 
+    /// Force the next update to refresh the icon and menu regardless of state
+    /// This should be called when settings change (e.g., custom assets folder)
+    pub fn force_refresh(&mut self) {
+        self.last_displayed_device = None;
+        self.last_icon_settings = None;
+    }
+
     pub fn update_devices(
         &mut self,
         devices: DeviceMap,
         show_percentage: bool,
+        text_size: u32,
+        text_color: &str,
+        font_name: &str,
+        text_align: &str,
+        text_x: i32,
+        text_y: i32,
+        show_percent_symbol: bool,
+        show_device_type_overlay: bool,
     ) -> Result<()> {
         *self.devices.lock().unwrap() = devices.clone();
 
         let device = Self::pick_device_to_display(&devices);
 
         if let Some(tray_icon) = &self.tray_icon {
-            // Update icon
-            if let Some(ref dev) = device {
-                let icon = crate::icon_manager::load_icon(
-                    dev.battery_percentage,
-                    dev.is_charging,
-                    show_percentage,
-                )?;
+            // Check if device info has changed
+            let current_device_state = device.as_ref().map(|d| {
+                (d.name.clone(), d.battery_percentage, d.is_charging)
+            });
 
-                tray_icon.set_icon(Some(icon))?;
+            // Check if icon settings have changed
+            let current_icon_settings = (
+                show_percentage,
+                text_size,
+                text_color.to_string(),
+                font_name.to_string(),
+                text_align.to_string(),
+                text_x,
+                text_y,
+                show_percent_symbol,
+                show_device_type_overlay,
+            );
 
-                let charging_text = if dev.is_charging {
-                    TOOLTIP_CHARGING_SUFFIX
+            let device_changed = self.last_displayed_device != current_device_state;
+            let settings_changed = self.last_icon_settings.as_ref() != Some(&current_icon_settings);
+
+            // Only update icon if device or settings changed
+            if device_changed || settings_changed {
+                if let Some(ref dev) = device {
+                    let icon = crate::icon_manager::load_icon(
+                        dev.battery_percentage,
+                        dev.is_charging,
+                        show_percentage,
+                        text_size,
+                        text_color,
+                        font_name,
+                        text_align,
+                        text_x,
+                        text_y,
+                        show_percent_symbol,
+                        show_device_type_overlay,
+                        dev.category,
+                    )?;
+
+                    tray_icon.set_icon(Some(icon))?;
+
+                    let charging_text = if dev.is_charging {
+                        TOOLTIP_CHARGING_SUFFIX
+                    } else {
+                        ""
+                    };
+                    tray_icon.set_tooltip(Some(format!(
+                        "{}: {}%{}",
+                        dev.name, dev.battery_percentage, charging_text
+                    )))?;
                 } else {
-                    ""
-                };
-                tray_icon.set_tooltip(Some(format!(
-                    "{}: {}%{}",
-                    dev.name, dev.battery_percentage, charging_text
-                )))?;
-            } else {
-                let icon = crate::icon_manager::load_unknown_icon()?;
-                tray_icon.set_icon(Some(icon))?;
-                tray_icon.set_tooltip(Some(TOOLTIP_NO_DEVICES))?;
+                    let icon = crate::icon_manager::load_unknown_icon()?;
+                    tray_icon.set_icon(Some(icon))?;
+                    tray_icon.set_tooltip(Some(TOOLTIP_NO_DEVICES))?;
+                }
+
+                self.last_icon_settings = Some(current_icon_settings);
             }
 
-            // Rebuild menu with updated device info
-            let new_menu = self.build_menu(device.as_ref())?;
-            tray_icon.set_menu(Some(Box::new(new_menu)));
+            // Only rebuild menu if device info actually changed
+            if device_changed {
+                let new_menu = self.build_menu(device.as_ref())?;
+                tray_icon.set_menu(Some(Box::new(new_menu)));
+                self.last_displayed_device = current_device_state;
+            }
         }
 
         Ok(())

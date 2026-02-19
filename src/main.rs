@@ -8,6 +8,7 @@ mod settings_window;
 mod startup;
 mod tray_manager;
 mod ui_constants;
+mod utils;
 mod watcher_v3;
 mod watcher_v4;
 
@@ -82,12 +83,23 @@ fn run_app() -> Result<()> {
     let settings = Settings::load()?;
     log(&format!("Settings loaded: {:?}", settings), debug_mode);
 
-    // Initialize custom assets folder if set
+    // Initialize custom assets folder (always set it, even if None)
     if let Some(ref folder_path) = settings.custom_assets_folder {
         let path = PathBuf::from(folder_path);
         icon_manager::set_custom_assets_folder(Some(path));
         log(&format!("Custom assets folder set to: {}", folder_path), debug_mode);
+    } else {
+        icon_manager::set_custom_assets_folder(None);
+        log("Custom assets folder cleared (using embedded assets)", debug_mode);
     }
+
+    // Initialize icon theme
+    let theme_str = format!("{:?}", settings.icon_theme).to_lowercase();
+    icon_manager::set_icon_theme(&theme_str);
+    log(&format!("Icon theme set to: {}", theme_str), debug_mode);
+
+    // Create hidden window to listen for system theme changes (WM_SETTINGCHANGE)
+    icon_manager::create_theme_change_listener();
 
     write_error_log("Applying autostart settings...");
     // Apply autostart setting (sync registry with settings)
@@ -185,11 +197,21 @@ fn run_v3_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
                             // Update custom assets folder
                             if let Some(ref folder_path) = settings.custom_assets_folder {
                                 let path = PathBuf::from(folder_path);
+                                log(&format!("Setting custom assets folder to: {}", folder_path), debug);
                                 icon_manager::set_custom_assets_folder(Some(path));
                             } else {
+                                log("Clearing custom assets folder (reverting to embedded)", debug);
                                 icon_manager::set_custom_assets_folder(None);
                             }
-                            
+
+                            // Update icon theme
+                            let theme_str = format!("{:?}", settings.icon_theme).to_lowercase();
+                            log(&format!("Setting icon theme to: {}", theme_str), debug);
+                            icon_manager::set_icon_theme(&theme_str);
+
+                            // Force icon refresh to apply new settings
+                            tray_manager.force_refresh();
+
                             // Force update to apply new icon style
                             if let Err(e) = parse_and_update_v3(&watcher, &mut tray_manager, &settings, debug) {
                                 log(&format!("Error updating after settings change: {}", e), debug);
@@ -199,6 +221,21 @@ fn run_v3_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
                 }
             }
             tray_manager::MenuAction::None => {}
+        }
+
+        // Re-apply theme if the OS theme changed and user has System mode selected
+        if settings.icon_theme == settings::IconTheme::System
+            && icon_manager::consume_system_theme_changed()
+        {
+            log("System theme changed, checking if resolved theme differs...", debug);
+            let theme_actually_changed = icon_manager::set_icon_theme("system");
+            if theme_actually_changed {
+                log("Resolved theme changed — refreshing icons", debug);
+                tray_manager.force_refresh();
+                if let Err(e) = parse_and_update_v3(&watcher, &mut tray_manager, &settings, debug) {
+                    log(&format!("Error refreshing after system theme change: {}", e), debug);
+                }
+            }
         }
 
         static mut COUNTER: u32 = 0;
@@ -266,11 +303,21 @@ fn run_v4_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
                             // Update custom assets folder
                             if let Some(ref folder_path) = settings.custom_assets_folder {
                                 let path = PathBuf::from(folder_path);
+                                log(&format!("Setting custom assets folder to: {}", folder_path), debug);
                                 icon_manager::set_custom_assets_folder(Some(path));
                             } else {
+                                log("Clearing custom assets folder (reverting to embedded)", debug);
                                 icon_manager::set_custom_assets_folder(None);
                             }
-                            
+
+                            // Update icon theme
+                            let theme_str = format!("{:?}", settings.icon_theme).to_lowercase();
+                            log(&format!("Setting icon theme to: {}", theme_str), debug);
+                            icon_manager::set_icon_theme(&theme_str);
+
+                            // Force icon refresh to apply new settings
+                            tray_manager.force_refresh();
+
                             // Force update to apply new icon style
                             if let Err(e) = parse_and_update_v4(&mut watcher, &log_path, &mut tray_manager, &settings, debug) {
                                 log(&format!("Error updating after settings change: {}", e), debug);
@@ -280,6 +327,21 @@ fn run_v4_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: 
                 }
             }
             tray_manager::MenuAction::None => {}
+        }
+
+        // Re-apply theme if the OS theme changed and user has System mode selected
+        if settings.icon_theme == settings::IconTheme::System
+            && icon_manager::consume_system_theme_changed()
+        {
+            log("System theme changed, checking if resolved theme differs...", debug);
+            let theme_actually_changed = icon_manager::set_icon_theme("system");
+            if theme_actually_changed {
+                log("Resolved theme changed — refreshing icons", debug);
+                tray_manager.force_refresh();
+                if let Err(e) = parse_and_update_v4(&mut watcher, &log_path, &mut tray_manager, &settings, debug) {
+                    log(&format!("Error refreshing after system theme change: {}", e), debug);
+                }
+            }
         }
 
         counter += 1;
@@ -329,6 +391,14 @@ fn parse_and_update_v3(
     tray_manager.update_devices(
         devices,
         settings.show_percentage,
+        settings.percentage_text_size,
+        &settings.percentage_text_color,
+        &settings.percentage_text_font,
+        &format!("{:?}", settings.percentage_text_align).to_lowercase(),
+        settings.percentage_text_x,
+        settings.percentage_text_y,
+        settings.show_percent_symbol,
+        settings.show_device_type_overlay,
     )?;
 
     Ok(())
@@ -362,6 +432,14 @@ fn parse_and_update_v4(
     tray_manager.update_devices(
         devices,
         settings.show_percentage,
+        settings.percentage_text_size,
+        &settings.percentage_text_color,
+        &settings.percentage_text_font,
+        &format!("{:?}", settings.percentage_text_align).to_lowercase(),
+        settings.percentage_text_x,
+        settings.percentage_text_y,
+        settings.show_percent_symbol,
+        settings.show_device_type_overlay,
     )?;
 
     Ok(())

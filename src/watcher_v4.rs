@@ -1,4 +1,4 @@
-use crate::device::{DeviceMap, RazerDevice};
+use crate::device::{DeviceCategory, DeviceMap, RazerDevice};
 use anyhow::Result;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -29,6 +29,8 @@ struct LoggedDeviceInfo {
     name: NameMap,
     #[allow(dead_code)]
     product_name: NameMap,
+    #[serde(default)]
+    category: DeviceCategory,
 }
 
 #[derive(Debug, Deserialize)]
@@ -174,6 +176,7 @@ impl SynapseV4Watcher {
                         is_charging,
                         is_connected,
                         is_selected,
+                        category: device_info.category,
                     },
                 );
 

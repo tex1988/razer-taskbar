@@ -7,6 +7,8 @@ edition = "2021"
 # System Tray
 tray-icon = "0.21.3"
 image = "0.25.9"
+imageproc = "0.26.0"
+ab_glyph = "0.2"
 
 # File Watching
 notify = "8.2.0"
@@ -40,6 +42,7 @@ windows = { version = "0.62.2", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
 ]}
+winreg = "0.55.0"
 
 [profile.release]
 opt-level = "z"     # Optimize for size

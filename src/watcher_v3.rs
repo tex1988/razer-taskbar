@@ -1,4 +1,4 @@
-use crate::device::{DeviceMap, RazerDevice};
+use crate::device::{DeviceCategory, DeviceMap, RazerDevice};
 use anyhow::Result;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -62,6 +62,7 @@ impl SynapseV3Watcher {
                     is_charging,
                     is_connected: false,
                     is_selected: shown_device_handle == handle || shown_device_handle.is_empty(),
+                    category: DeviceCategory::Unknown, // V3 logs don't provide category info
                 },
             );
         }
