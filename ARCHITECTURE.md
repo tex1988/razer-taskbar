@@ -32,30 +32,30 @@
 │                   Razer Taskbar (Rust)                           │
 │                                                                   │
 │  ┌────────────────────┐  ┌─────────────────────┐                │
-│  │  File Watcher      │  │  Log Parsers        │                │
-│  │  (notify crate)    │──│  - watcher_v3.rs   │                │
-│  │                    │  │  - watcher_v4.rs   │                │
-│  │  Detects changes   │  │  Regex/JSON parse  │                │
+│  │  Event Loop        │  │  Log Parsers        │                │
+│  │  (engine)          │──│  - watcher_v3       │                │
+│  │                    │  │  - watcher_v4       │                │
+│  │  Polls & dispatches│  │  Regex/JSON parse   │                │
 │  └────────────────────┘  └─────────┬───────────┘                │
 │                                    │                             │
 │                                    ▼                             │
 │                          ┌──────────────────┐                    │
-│                          │  Device Manager  │                    │
-│                          │  (device.rs)     │                    │
+│                          │  Model           │                    │
+│                          │  (model)         │                    │
 │                          │                  │                    │
-│                          │  - Device list   │                    │
-│                          │  - Battery %     │                    │
-│                          │  - Charging?     │                    │
+│                          │  - Device data   │                    │
+│                          │  - Settings      │                    │
+│                          │  - Icon config   │                    │
 │                          └────────┬─────────┘                    │
 │                                   │                              │
 │                                   ▼                              │
 │                          ┌──────────────────┐                    │
-│                          │  Tray Manager    │                    │
-│                          │  (tray_icon)     │                    │
+│                          │  UI Layer        │                    │
+│                          │  (ui)            │                    │
 │                          │                  │                    │
-│                          │  - Pick device   │                    │
-│                          │  - Create icon   │                    │
-│                          │  - Update tray   │                    │
+│                          │  - Tray manager  │                    │
+│                          │  - Settings GUI  │                    │
+│                          │  - Menu events   │                    │
 │                          └────────┬─────────┘                    │
 └─────────────────────────────────┼──────────────────────────────┘
                                   │
@@ -80,7 +80,7 @@
 │     level 87 state 0                                             │
 └────────────────────────┬─────────────────────────────────────────┘
                          │
-                         ▼ watcher_v3.rs
+                         ▼ engine::watcher_v3
         ┌────────────────────────────────────────┐
         │ Regex Pattern Match                    │
         ├────────────────────────────────────────┤
@@ -92,7 +92,7 @@
                          │
                          ▼
                 ┌────────────────────┐
-                │ RazerDevice        │
+                │ model::RazerDevice │
                 ├────────────────────┤
                 │ name: "Razer..."   │
                 │ handle: "12345"    │
@@ -120,11 +120,11 @@
 │ }]                                                               │
 └────────────────────────┬─────────────────────────────────────────┘
                          │
-                         ▼ watcher_v4.rs
+                         ▼ engine::watcher_v4
         ┌────────────────────────────────────────┐
         │ JSON Deserialization                   │
         ├────────────────────────────────────────┤
-        │ struct LoggedDeviceInfo {              │
+        │ model::LoggedDeviceInfo {             │
         │   serial_number: "AB123",              │
         │   has_battery: true,                   │
         │   power_status: {                      │
@@ -137,7 +137,7 @@
                          │
                          ▼
                 ┌────────────────────┐
-                │ RazerDevice        │
+                │ model::RazerDevice │
                 ├────────────────────┤
                 │ name: "Razer..."   │
                 │ handle: "AB123"    │
@@ -147,45 +147,42 @@
                 └────────────────────┘
 ```
 
-## File Watching Flow
+## Event Loop Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Main Event Loop (main.rs)                                   │
+│ main.rs → run_app()                                         │
 └─────┬───────────────────────────────────────────────────────┘
       │
-      ├─► Step 1: Detect Synapse version
+      ├─► Step 1: Load settings (model::Settings)
+      │
+      ├─► Step 2: Init assets & theme (engine::icon_manager)
+      │
+      ├─► Step 3: Detect Synapse version
       │   ├─ Check for V4 logs → exists? Use V4
       │   └─ Otherwise → Use V3
       │
-      ├─► Step 2: Create file watcher
-      │   ├─ V3: watch("Razer Synapse 3.log")
-      │   └─ V4: poll("systray_systrayv2*.log", every 5 sec)
+      ├─► Step 4: Create tray icon (ui::TrayManager)
       │
-      ├─► Step 3: Initial parse
-      │   └─ Parse log file → Update tray icon
-      │
-      └─► Step 4: Event loop
+      └─► Step 5: Enter event loop (engine::event_loop)
           │
-          ┌───────────────────────────┐
-          │ Every 5 seconds:          │
-          ├───────────────────────────┤
-          │ 1. Check menu events      │
-          │    └─ Quit clicked? Exit  │
-          │                           │
-          │ 2. Check log file         │
-          │    └─ Modified? Re-parse  │
-          │                           │
-          │ 3. Update tray icon       │
-          │    ├─ Pick device         │
-          │    ├─ Create icon         │
-          │    └─ Set tooltip         │
-          └───────────────────────────┘
-                      │
-                      └──► Repeat ──┐
-                                    │
-                      ┌─────────────┘
-                      ▼
+          ┌───────────────────────────────────────┐
+          │ Every polling interval:                │
+          ├───────────────────────────────────────┤
+          │ 1. Pump Windows messages               │
+          │                                        │
+          │ 2. Check menu events                   │
+          │    ├─ Quit → Exit                      │
+          │    └─ Settings → Open settings window  │
+          │                                        │
+          │ 3. Check system theme changes          │
+          │    └─ Theme changed? Refresh icons     │
+          │                                        │
+          │ 4. Poll log file for changes           │
+          │    ├─ Check log rotation (V4)          │
+          │    ├─ Parse devices                    │
+          │    └─ Update tray icon                 │
+          └───────────────────────────────────────┘
 ```
 
 ## Device Selection Logic
@@ -215,32 +212,36 @@ Battery Percentage: 87%
         │
         ▼
 ┌─────────────────────────┐
-│ Determine Level         │
-│ floor(87 / 20) * 25     │
-│ = floor(4.35) * 25      │
-│ = 4 * 25 = 100          │
+│ icon.properties lookup  │
+│ 81-100 → 100.png        │
+└────────┬────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│ Load base icon from     │
+│ theme (dark/light/       │
+│ system/custom)          │
 └────────┬────────────────┘
          │
          ▼
 ┌─────────────────────────┐     ┌──────────────────┐
-│ Is Charging?            │ ──► │ Yes: Green icon  │
+│ Is Charging?            │ ──► │ Yes: Overlay      │
+│                         │     │ charging.png      │
 └────────┬────────────────┘     └──────────────────┘
-         │ No
-         ▼
-┌─────────────────────────┐
-│ Select Color:           │
-│ 0-25%   → Red           │
-│ 26-50%  → Orange        │
-│ 51-75%  → Yellow        │
-│ 76-100% → Green         │
-└────────┬────────────────┘
          │
-         ▼ Level = 100, Color = Green
-┌─────────────────────────┐
-│ Create 32x32 image      │
-│ Fill bottom 87% green   │
-│ Fill top 13% dark gray  │
-└────────┬────────────────┘
+         ▼
+┌─────────────────────────┐     ┌──────────────────┐
+│ Show device overlay?    │ ──► │ Yes: Overlay      │
+│                         │     │ mouse/keyboard/   │
+│                         │     │ headphones.png    │
+└────────┬────────────────┘     └──────────────────┘
+         │
+         ▼
+┌─────────────────────────┐     ┌──────────────────┐
+│ Show percentage text?   │ ──► │ Yes: Draw text    │
+│                         │     │ with font, color, │
+│                         │     │ alignment, outline│
+└────────┬────────────────┘     └──────────────────┘
          │
          ▼
 ┌─────────────────────────┐
@@ -259,50 +260,79 @@ Battery Percentage: 87%
 ## Code Organization
 
 ```
-rust-implementation/
+src/
 │
-├── Cargo.toml ──────────────────┐
-│   Dependencies:                │
-│   - tray-icon (system tray)    │
-│   - notify (file watching)     │
-│   - regex (log parsing)        │
-│   - serde_json (JSON parsing)  │
-│   - image (icon generation)    │
-│                                │
-├── src/                         │
-│   │                            │
-│   ├── main.rs ─────────────────┤── Entry point
-│   │   - Detect V3/V4           │   Event loop
-│   │   - Setup file watcher     │   Error handling
-│   │   - Main event loop        │
-│   │                            │
-│   ├── device.rs ───────────────┤── Data structures
-│   │   - RazerDevice struct     │
-│   │   - DeviceMap type         │
-│   │                            │
-│   ├── settings.rs ─────────────┤── Configuration
-│   │   - Settings struct        │   JSON save/load
-│   │   - load() / save()        │
-│   │                            │
-│   ├── watcher_v3.rs ───────────┤── Synapse V3
-│   │   - Regex patterns         │   Log parsing
-│   │   - parse_devices()        │   Regex matching
-│   │                            │
-│   ├── watcher_v4.rs ───────────┤── Synapse V4
-│   │   - JSON structures        │   Log parsing
-│   │   - parse_devices()        │   JSON deserialization
-│   │                            │
-│   └── tray_manager.rs ─────────┤── System tray
-│       - TrayManager struct     │   Icon creation
-│       - update_devices()       │   Menu management
-│       - create_battery_icon()  │
-│                                │
-└── Documentation/               │
-    ├── README.md                │
-    ├── HOW_IT_WORKS.md          │
-    ├── QUICKSTART.md            │
-    └── IMPLEMENTATION_SUMMARY.md│
+├── main.rs ─────────────────── Entry point, app bootstrap, version detection
+│
+├── engine/ ─────────────────── Core logic: event loop, watchers, icon generation
+│   ├── mod.rs                  Module declarations & re-exports
+│   ├── event_loop.rs           Main event loop, Watcher trait, settings/theme handlers
+│   ├── watcher_common.rs       Shared watcher utilities (log_devices)
+│   ├── watcher_v3.rs           Synapse V3 log parser (regex-based)
+│   ├── watcher_v4.rs           Synapse V4 log parser (JSON-based)
+│   └── icon_manager/           Icon loading, theming, and text overlay
+│       ├── mod.rs              Public API: load_icon, load_unknown_icon, LoadIconParams
+│       ├── assets.rs           Embedded & custom asset loading, battery range lookup
+│       ├── text_overlay.rs     Percentage text rendering with font & outline
+│       └── theme.rs            Dark/light/system theme detection & switching
+│
+├── model/ ──────────────────── Data structures & configuration (no logic)
+│   ├── mod.rs                  Module declarations & re-exports
+│   ├── device.rs               RazerDevice, DeviceCategory, DeviceMap
+│   ├── icon_settings.rs        IconSettings, TextOverlayConfig
+│   ├── settings.rs             Settings (JSON persist), IconTheme, TextAlignment,
+│   │                           SynapseVersion, LogFontData
+│   └── v4_log_types.rs         LoggedDeviceInfo, PowerStatus, ChargingStatus, NameMap
+│
+├── ui/ ─────────────────────── User interface: tray, menus, settings window
+│   ├── mod.rs                  Module declarations & re-exports
+│   ├── constants.rs            UI string constants (menu text, tooltips)
+│   ├── context_menu.rs         Native Win32 popup menu (unused, for reference)
+│   ├── menu_events.rs          MenuAction enum, tray menu event handling
+│   ├── tray_manager.rs         TrayManager: icon updates, menu building, device picking
+│   └── settings/               Settings dialog (Win32 native)
+│       ├── mod.rs              SettingsWindow::show(), window creation, message loop
+│       ├── state.rs            SettingsWindowState, change detection, save logic
+│       ├── general_tab.rs      General tab controls (theme, assets, polling, autostart)
+│       ├── text_tab.rs         Text tab controls (font, color, alignment, position)
+│       ├── event_handlers.rs   WM_COMMAND/WM_NOTIFY dispatch, checkbox/edit/picker handlers
+│       ├── dialogs.rs          Color picker, font picker, folder browser, FontResult
+│       ├── helpers.rs          Win32 control helpers (checkbox, enable, show/hide, DPI)
+│       └── ffi_types.rs        Raw FFI structs (CHOOSECOLORW, CHOOSEFONTW, LOGFONTW)
+│
+├── util/ ───────────────────── Cross-cutting utilities
+│   ├── mod.rs                  Module declarations & re-exports
+│   ├── logging.rs              log() (debug console), write_error_log() (file)
+│   ├── startup.rs              Windows autostart shortcut (Startup folder .lnk)
+│   └── utils.rs                parse_hex_color(), to_wide() helpers
+│
+└── assets/ ─────────────────── Embedded icon assets
+    ├── icon.properties          Battery level → icon filename mapping
+    ├── app_icon.ico             Application icon
+    ├── dark/                    Dark theme icons (5/20/40/60/80/100.png, overlays)
+    └── light/                   Light theme icons (5/20/40/60/80/100.png, overlays)
 ```
+
+## Package Responsibilities
+
+| Package   | Responsibility                                     | Depends On         |
+|-----------|----------------------------------------------------|--------------------|
+| `main`    | Bootstrap, CLI args, wiring packages together       | all packages       |
+| `engine`  | Event loop, log parsing, icon generation            | `model`, `ui`, `util` |
+| `model`   | Data structures, settings persistence               | —                  |
+| `ui`      | Tray icon, menus, settings window (Win32)           | `model`, `engine`, `util` |
+| `util`    | Logging, autostart, shared helper functions         | —                  |
+
+## Key Design Decisions
+
+- **Single Responsibility**: Each package has a clear purpose — `model` for data,
+  `engine` for logic, `ui` for presentation, `util` for cross-cutting concerns.
+- **Watcher Trait**: `engine::event_loop::Watcher` abstracts V3/V4 differences
+  behind a common interface, enabling polymorphic dispatch in the event loop.
+- **Shared Utilities**: Common patterns (`to_wide`, `log_devices`, `compute_point_size`)
+  are extracted to avoid duplication across watchers and UI code.
+- **Enum `as_str()` methods**: `IconTheme` and `TextAlignment` provide `as_str()`
+  for consistent, allocation-free string conversion instead of `format!("{:?}")`.
 
 ## Key Insight: Why This Works
 

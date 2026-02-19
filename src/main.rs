@@ -1,62 +1,30 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod device;
-mod r_click_menu;
-mod icon_manager;
-mod settings;
-mod settings_window;
-mod startup;
-mod tray_manager;
-mod ui_constants;
-mod utils;
-mod watcher_v3;
-mod watcher_v4;
+mod engine;
+mod model;
+mod ui;
+mod util;
 
 use anyhow::Result;
-use device::DeviceMap;
-use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult};
-use settings::{Settings, SynapseVersion};
+use util::{log, write_error_log};
+use model::{Settings, SynapseVersion};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tray_manager::TrayManager;
-use watcher_v3::SynapseV3Watcher;
-use watcher_v4::SynapseV4Watcher;
-use std::fs::OpenOptions;
-use std::io::Write;
-#[cfg(target_os = "windows")]
-use windows::Win32::{
-    System::Console::AllocConsole,
-    UI::WindowsAndMessaging::{DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE},
-};
+use ui::TrayManager;
+use engine::{SynapseV3Watcher, SynapseV4Watcher};
 
-fn write_error_log(msg: &str) {
-    // Write to temp directory so it works regardless of working directory
-    if let Some(mut log_path) = std::env::temp_dir().parent().map(|p| p.to_path_buf()) {
-        log_path.push("razer_taskbar_errors.log");
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-        {
-            let _ = writeln!(file, "[{}] {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), msg);
-        }
-    }
-}
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Console::AllocConsole;
 
 fn main() -> Result<()> {
-    // Set panic hook to log panics
     std::panic::set_hook(Box::new(|panic_info| {
-        let msg = format!("Panic occurred: {:?}", panic_info);
-        write_error_log(&msg);
+        write_error_log(&format!("Panic occurred: {:?}", panic_info));
     }));
 
     match run_app() {
         Ok(_) => Ok(()),
         Err(e) => {
-            let msg = format!("Application error: {:?}", e);
-            write_error_log(&msg);
+            write_error_log(&format!("Application error: {:?}", e));
             Err(e)
         }
     }
@@ -64,383 +32,83 @@ fn main() -> Result<()> {
 
 fn run_app() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let debug_mode = args.iter().any(|a| a == "--debug" || a == "-d");
+    let debug = args.iter().any(|a| a == "--debug" || a == "-d");
 
     #[cfg(target_os = "windows")]
-    if debug_mode {
-        unsafe {
-            let _ = AllocConsole();
-            // Give the console time to initialize
-            std::thread::sleep(Duration::from_millis(100));
-        }
+    if debug {
+        unsafe { let _ = AllocConsole(); }
+        std::thread::sleep(Duration::from_millis(100));
         println!("=== Razer Taskbar - Debug Mode ===");
     }
 
     write_error_log("Application starting...");
-    log("Razer Taskbar - Starting...", debug_mode);
-
-    write_error_log("Loading settings...");
     let settings = Settings::load()?;
-    log(&format!("Settings loaded: {:?}", settings), debug_mode);
+    log(&format!("Settings loaded: {:?}", settings), debug);
 
-    // Initialize custom assets folder (always set it, even if None)
-    if let Some(ref folder_path) = settings.custom_assets_folder {
-        let path = PathBuf::from(folder_path);
-        icon_manager::set_custom_assets_folder(Some(path));
-        log(&format!("Custom assets folder set to: {}", folder_path), debug_mode);
-    } else {
-        icon_manager::set_custom_assets_folder(None);
-        log("Custom assets folder cleared (using embedded assets)", debug_mode);
+    init_assets_and_theme(&settings, debug);
+    engine::create_theme_change_listener();
+
+    if let Err(e) = util::startup::set_startup(settings.run_at_startup) {
+        log(&format!("Failed to apply autostart setting: {}", e), debug);
     }
 
-    // Initialize icon theme
-    let theme_str = format!("{:?}", settings.icon_theme).to_lowercase();
-    icon_manager::set_icon_theme(&theme_str);
-    log(&format!("Icon theme set to: {}", theme_str), debug_mode);
+    let mut tray = TrayManager::new()?;
+    tray.initialize()?;
+    log("Tray icon initialized", debug);
 
-    // Create hidden window to listen for system theme changes (WM_SETTINGCHANGE)
-    icon_manager::create_theme_change_listener();
+    let version = detect_synapse_version(&settings);
+    log(&format!("Using Synapse version: {:?}", version), debug);
+    write_error_log(&format!("Using Synapse version: {:?}", version));
 
-    write_error_log("Applying autostart settings...");
-    // Apply autostart setting (sync registry with settings)
-    if let Err(e) = startup::set_startup(settings.run_at_startup) {
-        log(&format!("Failed to apply autostart setting: {}", e), debug_mode);
-    }
-
-    write_error_log("Creating tray manager...");
-    let mut tray_manager = TrayManager::new()?;
-
-    write_error_log("Initializing tray manager...");
-    tray_manager.initialize()?;
-    log("Tray icon initialized", debug_mode);
-
-    write_error_log("Determining Synapse version...");
-    let synapse_version = match settings.synapse_version {
-        SynapseVersion::V3 => SynapseVersion::V3,
-        SynapseVersion::V4 => SynapseVersion::V4,
-        SynapseVersion::Auto => {
-            if SynapseV4Watcher::new().is_some() { SynapseVersion::V4 } else { SynapseVersion::V3 }
-        }
-    };
-    log(&format!("Using Synapse version: {:?}", synapse_version), debug_mode);
-    write_error_log(&format!("Using Synapse version: {:?}", synapse_version));
-
-    write_error_log("Starting watcher...");
-    match synapse_version {
-        SynapseVersion::V3 => run_v3_watcher(tray_manager, settings, debug_mode)?,
-        SynapseVersion::V4 => run_v4_watcher(tray_manager, settings, debug_mode)?,
-        _ => unreachable!(),
-    }
-
+    start_watcher(version, tray, settings, debug)?;
     write_error_log("Application exiting normally");
     Ok(())
 }
 
-fn log(msg: &str, debug: bool) {
-    if debug { println!("{}", msg); }
+fn init_assets_and_theme(settings: &Settings, debug: bool) {
+    if let Some(ref fp) = settings.custom_assets_folder {
+        engine::set_custom_assets_folder(Some(PathBuf::from(fp)));
+        log(&format!("Custom assets folder set to: {}", fp), debug);
+    } else {
+        engine::set_custom_assets_folder(None);
+    }
+    let theme = settings.icon_theme.as_str();
+    engine::set_icon_theme(&theme);
+    log(&format!("Icon theme set to: {}", theme), debug);
 }
 
-fn run_v3_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: bool) -> Result<()> {
-    let watcher = SynapseV3Watcher::new().ok_or_else(|| anyhow::anyhow!("Synapse V3 log file not found"))?;
-    let log_path = watcher.log_path().clone();
-    log(&format!("Watching Synapse V3 log: {:?}", log_path), debug);
-
-    let devices = Arc::new(Mutex::new(DeviceMap::new()));
-    let _devices_clone = devices.clone();
-
-    parse_and_update_v3(&watcher, &mut tray_manager, &settings, debug)?;
-
-    let throttle_duration = Duration::from_secs(settings.polling_interval_minutes * 60);
-    let mut debouncer = new_debouncer(
-        throttle_duration,
-        None,
-        move |result: DebounceEventResult| {
-            match result {
-                Ok(_events) => {},
-                Err(e) => {
-                    if debug { println!("Watch error: {:?}", e); }
-                }
-            }
-        },
-    )?;
-
-    // In notify 8.x, call watch directly on debouncer
-    debouncer.watch(&log_path, RecursiveMode::NonRecursive)?;
-
-    loop {
-        #[cfg(target_os = "windows")]
-        {
-            unsafe {
-                let mut msg = MSG::default();
-                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                    let _ = TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
-                }
-            }
-        }
-
-        std::thread::sleep(Duration::from_millis(100));
-
-        match tray_manager::handle_menu_events(tray_manager.quit_id(), tray_manager.settings_id(), debug)? {
-            tray_manager::MenuAction::Quit => {
-                log("Quit requested", debug);
-                break;
-            }
-            tray_manager::MenuAction::Settings => {
-                log("Opening settings window...", debug);
-                unsafe {
-                    if let Ok(changed) = settings_window::SettingsWindow::show(settings.clone()) {
-                        if changed {
-                            log("Settings changed, reloading...", debug);
-                            settings = Settings::load()?;
-                            
-                            // Update custom assets folder
-                            if let Some(ref folder_path) = settings.custom_assets_folder {
-                                let path = PathBuf::from(folder_path);
-                                log(&format!("Setting custom assets folder to: {}", folder_path), debug);
-                                icon_manager::set_custom_assets_folder(Some(path));
-                            } else {
-                                log("Clearing custom assets folder (reverting to embedded)", debug);
-                                icon_manager::set_custom_assets_folder(None);
-                            }
-
-                            // Update icon theme
-                            let theme_str = format!("{:?}", settings.icon_theme).to_lowercase();
-                            log(&format!("Setting icon theme to: {}", theme_str), debug);
-                            icon_manager::set_icon_theme(&theme_str);
-
-                            // Force icon refresh to apply new settings
-                            tray_manager.force_refresh();
-
-                            // Force update to apply new icon style
-                            if let Err(e) = parse_and_update_v3(&watcher, &mut tray_manager, &settings, debug) {
-                                log(&format!("Error updating after settings change: {}", e), debug);
-                            }
-                        }
-                    }
-                }
-            }
-            tray_manager::MenuAction::None => {}
-        }
-
-        // Re-apply theme if the OS theme changed and user has System mode selected
-        if settings.icon_theme == settings::IconTheme::System
-            && icon_manager::consume_system_theme_changed()
-        {
-            log("System theme changed, checking if resolved theme differs...", debug);
-            let theme_actually_changed = icon_manager::set_icon_theme("system");
-            if theme_actually_changed {
-                log("Resolved theme changed — refreshing icons", debug);
-                tray_manager.force_refresh();
-                if let Err(e) = parse_and_update_v3(&watcher, &mut tray_manager, &settings, debug) {
-                    log(&format!("Error refreshing after system theme change: {}", e), debug);
-                }
-            }
-        }
-
-        static mut COUNTER: u32 = 0;
-        unsafe {
-            COUNTER += 1;
-            if COUNTER >= (settings.polling_interval_minutes * 60 * 10) as u32 {
-                COUNTER = 0;
-                if let Err(e) = parse_and_update_v3(&watcher, &mut tray_manager, &settings, debug) {
-                    log(&format!("Error parsing devices: {}", e), debug);
-                }
+fn detect_synapse_version(settings: &Settings) -> SynapseVersion {
+    match settings.synapse_version {
+        SynapseVersion::V3 => SynapseVersion::V3,
+        SynapseVersion::V4 => SynapseVersion::V4,
+        SynapseVersion::Auto => {
+            if SynapseV4Watcher::new().is_some() {
+                SynapseVersion::V4
+            } else {
+                SynapseVersion::V3
             }
         }
     }
-
-    Ok(())
 }
 
-fn run_v4_watcher(mut tray_manager: TrayManager, mut settings: Settings, debug: bool) -> Result<()> {
-    write_error_log("Creating V4 watcher...");
-    let mut watcher = SynapseV4Watcher::new().ok_or_else(|| anyhow::anyhow!("Synapse V4 log directory not found"))?;
-
-    write_error_log("Getting log directory...");
-    let log_dir = watcher.log_dir().clone();
-    log(&format!("Watching Synapse V4 logs in: {:?}", log_dir), debug);
-    write_error_log(&format!("Watching Synapse V4 logs in: {:?}", log_dir));
-
-    write_error_log("Finding latest log file...");
-    let mut log_path = watcher.find_latest_log_file().ok_or_else(|| anyhow::anyhow!("No Synapse V4 log files found"))?;
-    log(&format!("Using log file: {:?}", log_path), debug);
-    write_error_log(&format!("Using log file: {:?}", log_path));
-
-    write_error_log("Parsing and updating devices...");
-    parse_and_update_v4(&mut watcher, &log_path, &mut tray_manager, &settings, debug)?;
-    write_error_log("Successfully parsed devices, entering main loop...");
-
-    let mut counter: u32 = 0;
-
-    loop {
-        #[cfg(target_os = "windows")]
-        {
-            unsafe {
-                let mut msg = MSG::default();
-                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                    let _ = TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
-                }
-            }
-        }
-
-        std::thread::sleep(Duration::from_millis(100));
-
-        match tray_manager::handle_menu_events(tray_manager.quit_id(), tray_manager.settings_id(), debug)? {
-            tray_manager::MenuAction::Quit => {
-                log("Quit requested", debug);
-                break;
-            }
-            tray_manager::MenuAction::Settings => {
-                log("Opening settings window...", debug);
-                unsafe {
-                    if let Ok(changed) = settings_window::SettingsWindow::show(settings.clone()) {
-                        if changed {
-                            log("Settings changed, reloading...", debug);
-                            settings = Settings::load()?;
-                            
-                            // Update custom assets folder
-                            if let Some(ref folder_path) = settings.custom_assets_folder {
-                                let path = PathBuf::from(folder_path);
-                                log(&format!("Setting custom assets folder to: {}", folder_path), debug);
-                                icon_manager::set_custom_assets_folder(Some(path));
-                            } else {
-                                log("Clearing custom assets folder (reverting to embedded)", debug);
-                                icon_manager::set_custom_assets_folder(None);
-                            }
-
-                            // Update icon theme
-                            let theme_str = format!("{:?}", settings.icon_theme).to_lowercase();
-                            log(&format!("Setting icon theme to: {}", theme_str), debug);
-                            icon_manager::set_icon_theme(&theme_str);
-
-                            // Force icon refresh to apply new settings
-                            tray_manager.force_refresh();
-
-                            // Force update to apply new icon style
-                            if let Err(e) = parse_and_update_v4(&mut watcher, &log_path, &mut tray_manager, &settings, debug) {
-                                log(&format!("Error updating after settings change: {}", e), debug);
-                            }
-                        }
-                    }
-                }
-            }
-            tray_manager::MenuAction::None => {}
-        }
-
-        // Re-apply theme if the OS theme changed and user has System mode selected
-        if settings.icon_theme == settings::IconTheme::System
-            && icon_manager::consume_system_theme_changed()
-        {
-            log("System theme changed, checking if resolved theme differs...", debug);
-            let theme_actually_changed = icon_manager::set_icon_theme("system");
-            if theme_actually_changed {
-                log("Resolved theme changed — refreshing icons", debug);
-                tray_manager.force_refresh();
-                if let Err(e) = parse_and_update_v4(&mut watcher, &log_path, &mut tray_manager, &settings, debug) {
-                    log(&format!("Error refreshing after system theme change: {}", e), debug);
-                }
-            }
-        }
-
-        counter += 1;
-        if counter >= (settings.polling_interval_minutes * 60 * 10) as u32 {
-            counter = 0;
-
-            if let Some(new_log_path) = watcher.find_latest_log_file() {
-                if new_log_path != log_path {
-                    log(&format!("Log file changed to: {:?}", new_log_path), debug);
-                    log_path = new_log_path;
-                }
-            }
-
-            if let Err(e) = parse_and_update_v4(&mut watcher, &log_path, &mut tray_manager, &settings, debug) {
-                log(&format!("Error parsing devices: {}", e), debug);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn parse_and_update_v3(
-    watcher: &SynapseV3Watcher,
-    tray_manager: &mut TrayManager,
-    settings: &Settings,
+fn start_watcher(
+    version: SynapseVersion,
+    tray: TrayManager,
+    settings: Settings,
     debug: bool,
 ) -> Result<()> {
-    let devices = watcher.parse_devices(&settings.shown_device_handle)?;
-
-    if !devices.is_empty() {
-        log(&format!("Found {} devices:", devices.len()), debug);
-        for device in devices.values() {
-            log(
-                &format!(
-                    "  - {} ({}%{}){}",
-                    device.name,
-                    device.battery_percentage,
-                    if device.is_charging { " charging" } else { "" },
-                    if !device.is_connected { " [disconnected]" } else { "" }
-                ),
-                debug,
-            );
+    match version {
+        SynapseVersion::V3 => {
+            let watcher = SynapseV3Watcher::new()
+                .ok_or_else(|| anyhow::anyhow!("Synapse V3 log not found"))?;
+            engine::run_event_loop(watcher, tray, settings, debug)
         }
-    }
-
-    tray_manager.update_devices(
-        devices,
-        settings.show_percentage,
-        settings.percentage_text_size,
-        &settings.percentage_text_color,
-        &settings.percentage_text_font,
-        &format!("{:?}", settings.percentage_text_align).to_lowercase(),
-        settings.percentage_text_x,
-        settings.percentage_text_y,
-        settings.show_percent_symbol,
-        settings.show_device_type_overlay,
-    )?;
-
-    Ok(())
-}
-
-fn parse_and_update_v4(
-    watcher: &mut SynapseV4Watcher,
-    log_path: &PathBuf,
-    tray_manager: &mut TrayManager,
-    settings: &Settings,
-    debug: bool,
-) -> Result<()> {
-    let devices = watcher.parse_devices(log_path, &settings.shown_device_handle, debug)?;
-
-    if !devices.is_empty() {
-        log(&format!("Found {} devices:", devices.len()), debug);
-        for device in devices.values() {
-            log(
-                &format!(
-                    "  - {} ({}%{}){}",
-                    device.name,
-                    device.battery_percentage,
-                    if device.is_charging { " charging" } else { "" },
-                    if !device.is_connected { " [disconnected]" } else { "" }
-                ),
-                debug,
-            );
+        SynapseVersion::V4 => {
+            let mut watcher = SynapseV4Watcher::new()
+                .ok_or_else(|| anyhow::anyhow!("Synapse V4 log dir not found"))?;
+            watcher.init(&settings.shown_device_handle)?;
+            engine::run_event_loop(watcher, tray, settings, debug)
         }
+        _ => unreachable!(),
     }
-
-    tray_manager.update_devices(
-        devices,
-        settings.show_percentage,
-        settings.percentage_text_size,
-        &settings.percentage_text_color,
-        &settings.percentage_text_font,
-        &format!("{:?}", settings.percentage_text_align).to_lowercase(),
-        settings.percentage_text_x,
-        settings.percentage_text_y,
-        settings.show_percent_symbol,
-        settings.show_device_type_overlay,
-    )?;
-
-    Ok(())
 }

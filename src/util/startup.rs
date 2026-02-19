@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use super::utils::to_wide;
 
 const APP_NAME: &str = "RazerTaskbar";
 
@@ -69,24 +70,24 @@ fn create_shortcut(shortcut_path: &PathBuf) -> Result<()> {
 
         // Get current executable path
         let exe_path = env::current_exe()?;
-        let exe_path_str: Vec<u16> = exe_path.to_string_lossy().encode_utf16().chain(Some(0)).collect();
+        let exe_path_str = to_wide(&exe_path.to_string_lossy());
 
         // Set the target path
         shell_link.SetPath(windows::core::PCWSTR(exe_path_str.as_ptr()))?;
 
         // Set working directory to exe directory
         if let Some(parent) = exe_path.parent() {
-            let work_dir: Vec<u16> = parent.to_string_lossy().encode_utf16().chain(Some(0)).collect();
+            let work_dir = to_wide(&parent.to_string_lossy());
             shell_link.SetWorkingDirectory(windows::core::PCWSTR(work_dir.as_ptr()))?;
         }
 
         // Set description
-        let description: Vec<u16> = "Razer Taskbar - Battery Monitor".encode_utf16().chain(Some(0)).collect();
+        let description = to_wide("Razer Taskbar - Battery Monitor");
         shell_link.SetDescription(windows::core::PCWSTR(description.as_ptr()))?;
 
         // Save the shortcut
         let persist_file: IPersistFile = shell_link.cast()?;
-        let shortcut_path_str: Vec<u16> = shortcut_path.to_string_lossy().encode_utf16().chain(Some(0)).collect();
+        let shortcut_path_str = to_wide(&shortcut_path.to_string_lossy());
         persist_file.Save(windows::core::PCWSTR(shortcut_path_str.as_ptr()), true)?;
 
         // Cleanup COM

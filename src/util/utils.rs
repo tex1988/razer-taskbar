@@ -14,3 +14,8 @@ pub fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8)> {
     Some((r, g, b))
 }
 
+/// Convert a &str to a null-terminated wide string (Vec<u16>) for Win32 APIs
+pub fn to_wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(Some(0)).collect()
+}
+

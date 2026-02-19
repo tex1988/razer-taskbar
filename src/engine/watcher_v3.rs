@@ -1,4 +1,8 @@
-use crate::device::{DeviceCategory, DeviceMap, RazerDevice};
+use crate::model::{DeviceCategory, DeviceMap, RazerDevice};
+use super::event_loop::Watcher;
+use super::watcher_common::log_devices;
+use crate::model::IconSettings;
+use crate::ui::TrayManager;
 use anyhow::Result;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -81,10 +85,6 @@ impl SynapseV3Watcher {
 
         Ok(devices)
     }
-
-    pub fn log_path(&self) -> &PathBuf {
-        &self.log_path
-    }
 }
 
 fn get_last_match_by_handle<'a>(
@@ -112,3 +112,22 @@ fn get_last_match_by_handle_with_index<'a>(
     }
     map
 }
+
+impl Watcher for SynapseV3Watcher {
+    fn parse_and_update(
+        &mut self,
+        tray: &mut TrayManager,
+        icon_settings: &IconSettings,
+        debug: bool,
+    ) -> Result<()> {
+        let devices = self.parse_devices("")?;
+        log_devices(&devices, debug);
+        tray.update_devices(devices, icon_settings)
+    }
+
+    fn check_log_rotation(&mut self, _debug: bool) {
+        // V3 uses a single log file, no rotation needed
+    }
+}
+
+
