@@ -133,6 +133,9 @@ pub struct Settings {
     pub display_charging_state: bool,
     #[serde(default)]
     pub shown_device_handle: String,
+    /// Device handles explicitly hidden from the tray. Empty = show all.
+    #[serde(default)]
+    pub hidden_device_handles: Vec<String>,
     #[serde(default = "default_synapse_version")]
     pub synapse_version: SynapseVersion,
     #[serde(default)]
@@ -159,6 +162,7 @@ impl Default for Settings {
             polling_interval_minutes: default_polling_interval(),
             display_charging_state: default_display_charging(),
             shown_device_handle: String::new(),
+            hidden_device_handles: Vec::new(),
             synapse_version: default_synapse_version(),
             custom_assets_folder: None,
             icon_theme: IconTheme::default(),

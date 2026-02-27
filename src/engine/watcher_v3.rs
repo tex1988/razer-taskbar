@@ -46,7 +46,7 @@ impl SynapseV3Watcher {
         }
     }
 
-    pub fn parse_devices(&self, shown_device_handle: &str) -> Result<DeviceMap> {
+    pub fn parse_devices(&self, hidden_handles: &[String]) -> Result<DeviceMap> {
         let log_content = fs::read_to_string(&self.log_path)?;
         let mut devices = DeviceMap::new();
 
@@ -65,7 +65,7 @@ impl SynapseV3Watcher {
                     battery_percentage: level,
                     is_charging,
                     is_connected: false,
-                    is_selected: shown_device_handle == handle || shown_device_handle.is_empty(),
+                    is_selected: !hidden_handles.contains(&handle),
                     category: DeviceCategory::Unknown, // V3 logs don't provide category info
                 },
             );
@@ -120,7 +120,7 @@ impl Watcher for SynapseV3Watcher {
         icon_settings: &IconSettings,
         debug: bool,
     ) -> Result<()> {
-        let devices = self.parse_devices("")?;
+        let devices = self.parse_devices(&[])?;
         log_devices(&devices, debug);
         tray.update_devices(devices, icon_settings)
     }

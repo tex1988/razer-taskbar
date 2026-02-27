@@ -22,7 +22,7 @@ lazy_static! {
 pub struct SynapseV4Watcher {
     log_dir: PathBuf,
     log_path: Option<PathBuf>,
-    shown_device_handle: String,
+    hidden_device_handles: Vec<String>,
     last_parsed_timestamp: String,
     last_devices: DeviceMap,
 }
@@ -36,15 +36,15 @@ impl SynapseV4Watcher {
         if log_dir.exists() {
             Some(Self {
                 log_dir, log_path: None,
-                shown_device_handle: String::new(),
+                hidden_device_handles: Vec::new(),
                 last_parsed_timestamp: String::new(),
                 last_devices: DeviceMap::new(),
             })
         } else { None }
     }
 
-    pub fn init(&mut self, shown_handle: &str) -> Result<()> {
-        self.shown_device_handle = shown_handle.to_string();
+    pub fn init(&mut self, hidden_handles: &[String]) -> Result<()> {
+        self.hidden_device_handles = hidden_handles.to_vec();
         self.log_path = self.find_latest_log_file();
         if self.log_path.is_none() {
             anyhow::bail!("No Synapse V4 log files found");
@@ -90,8 +90,8 @@ impl SynapseV4Watcher {
         self.last_parsed_timestamp = timestamp.to_string();
         let json_str = last_match.name("json").unwrap().as_str();
         let infos = parse_json(json_str, debug)?;
-        let handle = &self.shown_device_handle;
-        let mut devices = build_device_map(&infos, handle, debug);
+        let hidden = &self.hidden_device_handles;
+        let mut devices = build_device_map(&infos, hidden, debug);
         remove_duplicate_no_serial(&mut devices);
         if debug { println!("Parsed battery changes until {}", timestamp); }
         self.last_devices = devices.clone();
@@ -114,11 +114,11 @@ fn parse_json(json_str: &str, debug: bool) -> Result<Vec<LoggedDeviceInfo>> {
 }
 
 fn build_device_map(
-    infos: &[LoggedDeviceInfo], shown_handle: &str, debug: bool,
+    infos: &[LoggedDeviceInfo], hidden_handles: &[String], debug: bool,
 ) -> DeviceMap {
     let mut devices = DeviceMap::new();
     for info in infos.iter().filter(|d| d.has_battery) {
-        if let Some(dev) = build_device(info, infos, shown_handle, debug) {
+        if let Some(dev) = build_device(info, infos, hidden_handles, debug) {
             devices.insert(dev.handle.clone(), dev);
         }
     }
@@ -127,7 +127,7 @@ fn build_device_map(
 
 fn build_device(
     info: &LoggedDeviceInfo, all: &[LoggedDeviceInfo],
-    shown_handle: &str, debug: bool,
+    hidden_handles: &[String], debug: bool,
 ) -> Option<RazerDevice> {
     let handle = info.serial_number.clone()
         .unwrap_or_else(|| info.device_container_id.clone());
@@ -144,7 +144,7 @@ fn build_device(
         battery_percentage: ps.level,
         is_charging: ps.charging_status.is_charging(),
         is_connected,
-        is_selected: shown_handle.is_empty() || shown_handle == sn,
+        is_selected: !hidden_handles.iter().any(|h| h == sn || h == &info.device_container_id),
         category: info.category,
     })
 }
