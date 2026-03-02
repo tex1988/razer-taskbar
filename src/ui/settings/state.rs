@@ -1,4 +1,4 @@
-use crate::model::Settings;
+use crate::model::{DeviceConfig, Settings};
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub struct SettingsWindowState {
@@ -16,6 +16,7 @@ pub struct SettingsWindowState {
     pub custom_assets_folder: Option<String>,
     pub icon_theme: String,
     pub show_device_type_overlay: bool,
+    pub device_configs: Vec<DeviceConfig>,
     pub settings: Settings,
 }
 
@@ -37,6 +38,7 @@ pub fn init_state(s: &Settings) {
         custom_assets_folder: s.custom_assets_folder.clone(),
         icon_theme: s.icon_theme.as_str().to_string(),
         show_device_type_overlay: s.show_device_type_overlay,
+        device_configs: s.device_configs.clone(),
         settings: s.clone(),
     };
     // Re-initialize each time the settings window opens
@@ -67,6 +69,7 @@ pub fn has_changed(original: &Settings) -> bool {
             || s.custom_assets_folder != original.custom_assets_folder
             || s.icon_theme != original.icon_theme.as_str()
             || s.show_device_type_overlay != original.show_device_type_overlay
+            || s.device_configs != original.device_configs
     }).unwrap_or(false)
 }
 
@@ -108,5 +111,6 @@ fn apply_state_to_settings(s: &SettingsWindowState, ns: &mut Settings) {
         _ => crate::model::IconTheme::Dark,
     };
     ns.show_device_type_overlay = s.show_device_type_overlay;
+    ns.device_configs = s.device_configs.clone();
 }
 

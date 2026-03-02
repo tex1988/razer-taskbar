@@ -11,14 +11,14 @@ use tray_icon::{TrayIcon, TrayIconBuilder};
 type DeviceState = (String, u8, bool); // (name, battery_percentage, is_charging)
 
 pub struct TrayManager {
-    /// One tray icon per connected+selected device, keyed by device handle.
+    /// One tray icon per connected+selected device, keyed by device unique_id.
     tray_icons: HashMap<String, TrayIcon>,
     /// Fallback icon shown when no devices are available.
     fallback_icon: Option<TrayIcon>,
     quit_id: MenuId,
     settings_id: MenuId,
     devices: Arc<Mutex<DeviceMap>>,
-    /// Cached state per device handle for change detection.
+    /// Cached state per device unique_id for change detection.
     last_device_states: HashMap<String, DeviceState>,
     last_icon_settings: Option<IconSettings>,
 }
@@ -61,6 +61,12 @@ impl TrayManager {
         let charging = if device.is_charging { " (charging)" } else { "" };
         let info = format!("{} - {}%{}", device.name, device.battery_percentage, charging);
         menu.append(&MenuItem::new(&info, false, None))?;
+
+        // Serial number line
+        if let Some(ref sn) = device.serial_number {
+            let sn_line = format!("SN: {}", sn);
+            menu.append(&MenuItem::new(&sn_line, false, None))?;
+        }
 
         menu.append(&PredefinedMenuItem::separator())?;
 
@@ -108,17 +114,16 @@ impl TrayManager {
 
         let settings_changed = self.last_icon_settings.as_ref() != Some(icon_settings);
 
-        // Collect active devices sorted by handle for stable ordering.
-        let mut active: Vec<&RazerDevice> = devices.values()
+        // Collect active devices.
+        let active: Vec<&RazerDevice> = devices.values()
             .filter(|d| d.is_connected && d.is_selected)
             .collect();
-        active.sort_by(|a, b| a.handle.cmp(&b.handle));
 
-        let active_handles: Vec<String> = active.iter().map(|d| d.handle.clone()).collect();
+        let active_ids: Vec<String> = active.iter().map(|d| d.unique_id().to_string()).collect();
 
         // ── Remove icons for devices no longer active ──────────
-        self.tray_icons.retain(|handle, _| active_handles.contains(handle));
-        self.last_device_states.retain(|handle, _| active_handles.contains(handle));
+        self.tray_icons.retain(|uid, _| active_ids.contains(uid));
+        self.last_device_states.retain(|uid, _| active_ids.contains(uid));
 
         // ── Manage fallback icon ───────────────────────────────
         if active.is_empty() {
@@ -141,29 +146,29 @@ impl TrayManager {
 
         // ── Create / update per-device icons ───────────────────
         for device in &active {
-            let handle = &device.handle;
+            let uid = device.unique_id().to_string();
             let current_state: DeviceState = (
                 device.name.clone(),
                 device.battery_percentage,
                 device.is_charging,
             );
 
-            let device_changed = self.last_device_states.get(handle.as_str()) != Some(&current_state);
+            let device_changed = self.last_device_states.get(&uid) != Some(&current_state);
 
-            if self.tray_icons.contains_key(handle.as_str()) {
-                // Icon already exists — update if state or settings changed.
+            if self.tray_icons.contains_key(&uid) {
+                // Icon exists — update if state or settings changed.
                 if device_changed || settings_changed {
-                    if let Some(tray_icon) = self.tray_icons.get(handle.as_str()) {
+                    if let Some(tray_icon) = self.tray_icons.get(&uid) {
                         self.apply_device_to_icon(tray_icon, device, icon_settings)?;
                     }
                 }
             } else {
                 // New device — create a tray icon.
                 let tray_icon = self.create_device_tray_icon(device, icon_settings)?;
-                self.tray_icons.insert(handle.clone(), tray_icon);
+                self.tray_icons.insert(uid.clone(), tray_icon);
             }
 
-            self.last_device_states.insert(handle.clone(), current_state);
+            self.last_device_states.insert(uid, current_state);
         }
 
         self.last_icon_settings = Some(icon_settings.clone());

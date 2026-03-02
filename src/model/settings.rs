@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use anyhow::Result;
 use super::icon_settings::IconSettings;
+use super::device::DeviceConfig;
 
 // ── LogFontData ────────────────────────────────────────────────
 
@@ -133,7 +134,9 @@ pub struct Settings {
     pub display_charging_state: bool,
     #[serde(default)]
     pub shown_device_handle: String,
-    /// Device handles explicitly hidden from the tray. Empty = show all.
+    /// Per-device configurations (visibility, display order). Auto-discovered.
+    #[serde(default)]
+    pub device_configs: Vec<DeviceConfig>,
     #[serde(default)]
     pub hidden_device_handles: Vec<String>,
     #[serde(default = "default_synapse_version")]
@@ -162,6 +165,7 @@ impl Default for Settings {
             polling_interval_minutes: default_polling_interval(),
             display_charging_state: default_display_charging(),
             shown_device_handle: String::new(),
+            device_configs: Vec::new(),
             hidden_device_handles: Vec::new(),
             synapse_version: default_synapse_version(),
             custom_assets_folder: None,
@@ -212,6 +216,59 @@ impl Settings {
         let data_dir = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."));
         data_dir.join("razer-taskbar").join("settings.json")
+    }
+
+    // ── Device config helpers ──────────────────────────────────
+
+    /// Look up a device config by unique id.
+    #[allow(dead_code)]
+    pub fn get_device_config(&self, unique_id: &str) -> Option<&DeviceConfig> {
+        self.device_configs.iter().find(|c| c.id == unique_id)
+    }
+
+    /// Returns true if a device should be visible in the tray.
+    /// Devices not yet in device_configs are visible by default.
+    #[allow(dead_code)]
+    pub fn is_device_visible(&self, unique_id: &str) -> bool {
+        self.get_device_config(unique_id)
+            .map(|c| c.visible)
+            .unwrap_or(true)
+    }
+
+    /// Sync device_configs with the currently discovered devices.
+    /// Adds new devices, marks disconnected devices, updates names.
+    /// Returns true if anything changed.
+    pub fn sync_device_configs(&mut self, devices: &[(String, String)]) -> bool {
+        let mut changed = false;
+        let discovered_ids: Vec<&str> = devices.iter().map(|(id, _)| id.as_str()).collect();
+
+        // Mark disconnected devices as not connected
+        for cfg in &mut self.device_configs {
+            let is_connected = discovered_ids.contains(&cfg.id.as_str());
+            if cfg.connected != is_connected {
+                cfg.connected = is_connected;
+                changed = true;
+            }
+        }
+
+        // Add or update discovered devices
+        for (unique_id, name) in devices {
+            if let Some(existing) = self.device_configs.iter_mut().find(|c| c.id == *unique_id) {
+                if existing.name != *name {
+                    existing.name = name.clone();
+                    changed = true;
+                }
+            } else {
+                self.device_configs.push(DeviceConfig {
+                    id: unique_id.clone(),
+                    name: name.clone(),
+                    visible: true,
+                    connected: true,
+                });
+                changed = true;
+            }
+        }
+        changed
     }
 }
 

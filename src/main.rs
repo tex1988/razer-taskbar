@@ -11,7 +11,9 @@ use model::{Settings, SynapseVersion};
 use std::path::PathBuf;
 use std::time::Duration;
 use ui::TrayManager;
-use engine::{EmulationWatcher, SynapseV3Watcher, SynapseV4Watcher};
+use engine::{SynapseV3Watcher, SynapseV4Watcher};
+#[cfg(debug_assertions)]
+use engine::EmulationWatcher;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::AllocConsole;
@@ -33,16 +35,27 @@ fn main() -> Result<()> {
 fn run_app() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let debug = args.iter().any(|a| a == "--debug" || a == "-d");
+    #[cfg(debug_assertions)]
     let emulate = args.iter().any(|a| a == "--emulate" || a == "-e");
 
     #[cfg(target_os = "windows")]
-    if debug || emulate {
-        unsafe { let _ = AllocConsole(); }
-        std::thread::sleep(Duration::from_millis(100));
-        if emulate {
-            println!("=== Razer Taskbar - Emulation Mode ===");
-            println!("Using fake devices (no Razer Synapse required)");
-        } else {
+    {
+        #[cfg(debug_assertions)]
+        let show_console = debug || emulate;
+        #[cfg(not(debug_assertions))]
+        let show_console = debug;
+
+        if show_console {
+            unsafe { let _ = AllocConsole(); }
+            std::thread::sleep(Duration::from_millis(100));
+            #[cfg(debug_assertions)]
+            if emulate {
+                println!("=== Razer Taskbar - Emulation Mode ===");
+                println!("Using fake devices (no Razer Synapse required)");
+            } else {
+                println!("=== Razer Taskbar - Debug Mode ===");
+            }
+            #[cfg(not(debug_assertions))]
             println!("=== Razer Taskbar - Debug Mode ===");
         }
     }
@@ -62,12 +75,21 @@ fn run_app() -> Result<()> {
     tray.initialize()?;
     log("Tray icon initialized", debug);
 
+    #[cfg(debug_assertions)]
     if emulate {
         log("Starting emulation watcher with fake devices", debug);
         write_error_log("Using emulation mode");
         let watcher = EmulationWatcher::new();
         engine::run_event_loop(watcher, tray, settings, debug)?;
     } else {
+        let version = detect_synapse_version(&settings);
+        log(&format!("Using Synapse version: {:?}", version), debug);
+        write_error_log(&format!("Using Synapse version: {:?}", version));
+        start_watcher(version, tray, settings, debug)?;
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
         let version = detect_synapse_version(&settings);
         log(&format!("Using Synapse version: {:?}", version), debug);
         write_error_log(&format!("Using Synapse version: {:?}", version));
@@ -118,7 +140,7 @@ fn start_watcher(
         SynapseVersion::V4 => {
             let mut watcher = SynapseV4Watcher::new()
                 .ok_or_else(|| anyhow::anyhow!("Synapse V4 log dir not found"))?;
-            watcher.init(&settings.hidden_device_handles)?;
+            watcher.init(&settings.device_configs)?;
             engine::run_event_loop(watcher, tray, settings, debug)
         }
         _ => unreachable!(),

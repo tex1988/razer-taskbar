@@ -7,6 +7,7 @@ use super::helpers::*;
 use super::state;
 use super::general_tab::GENERAL_TAB_IDS;
 use super::text_tab::TEXT_TAB_IDS;
+use super::devices_tab;
 use super::dialogs;
 use crate::util::to_wide;
 
@@ -48,7 +49,14 @@ unsafe fn handle_command(hwnd: HWND, wparam: WPARAM) -> LRESULT {
         1007 => { if notif == BN_CLICKED { handle_custom_assets_toggle(hwnd); } }
         1006 => { if notif == BN_CLICKED { handle_browse(hwnd); } }
         9001 => handle_ok_button(hwnd),
-        _ => {}
+        _ => {
+            // Check if it's a per-device delete button from the Devices tab
+            if notif == BN_CLICKED {
+                if let Some(dev_idx) = devices_tab::delete_button_index(id) {
+                    devices_tab::handle_delete_device(hwnd, dev_idx);
+                }
+            }
+        }
     }
     LRESULT(0)
 }
@@ -151,6 +159,8 @@ unsafe fn handle_ok_button(hwnd: HWND) {
         read_edit_text(hwnd, 1005).filter(|t| !t.trim().is_empty())
     } else { None };
     state::with_state(|s| s.custom_assets_folder = folder);
+    // Read devices tab (visibility)
+    devices_tab::read_devices_tab(hwnd);
     let _ = DestroyWindow(hwnd);
 }
 
@@ -165,13 +175,16 @@ unsafe fn handle_notify(hwnd: HWND, lparam: LPARAM) -> LRESULT {
 unsafe fn handle_tab_switch(hwnd: HWND) {
     if let Ok(tab) = GetDlgItem(Some(hwnd), 3000) {
         let idx = SendMessageW(tab, TCM_GETCURSEL, None, None).0;
-        let (show_gen, show_txt) = match idx {
-            0 => (true, false),
-            1 => (false, true),
-            _ => (true, false),
+        let (show_gen, show_txt, show_dev) = match idx {
+            0 => (true, false, false),
+            1 => (false, true, false),
+            2 => (false, false, true),
+            _ => (true, false, false),
         };
         for &id in GENERAL_TAB_IDS { show_hide_control(hwnd, id, show_gen); }
         for &id in TEXT_TAB_IDS { show_hide_control(hwnd, id, show_txt); }
+        let dev_ids = devices_tab::devices_tab_ids();
+        for id in dev_ids { show_hide_control(hwnd, id, show_dev); }
     }
 }
 

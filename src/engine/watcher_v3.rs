@@ -1,7 +1,7 @@
-use crate::model::{DeviceCategory, DeviceMap, RazerDevice};
+use crate::model::{DeviceCategory, DeviceConfig, DeviceMap, RazerDevice};
+use crate::model::{IconSettings, Settings};
 use super::event_loop::Watcher;
 use super::watcher_common::log_devices;
-use crate::model::IconSettings;
 use crate::ui::TrayManager;
 use anyhow::Result;
 use lazy_static::lazy_static;
@@ -28,6 +28,7 @@ lazy_static! {
 
 pub struct SynapseV3Watcher {
     log_path: PathBuf,
+    cached_devices: DeviceMap,
 }
 
 impl SynapseV3Watcher {
@@ -40,13 +41,13 @@ impl SynapseV3Watcher {
             .join("Razer Synapse 3.log");
 
         if log_path.exists() {
-            Some(Self { log_path })
+            Some(Self { log_path, cached_devices: DeviceMap::new() })
         } else {
             None
         }
     }
 
-    pub fn parse_devices(&self, hidden_handles: &[String]) -> Result<DeviceMap> {
+    pub fn parse_devices(&self, configs: &[DeviceConfig]) -> Result<DeviceMap> {
         let log_content = fs::read_to_string(&self.log_path)?;
         let mut devices = DeviceMap::new();
 
@@ -57,15 +58,21 @@ impl SynapseV3Watcher {
             let level = caps.name("level").unwrap().as_str().parse::<u8>().unwrap_or(0);
             let is_charging = caps.name("isCharging").unwrap().as_str() != "0";
 
+            let is_visible = configs.iter()
+                .find(|c| c.id == handle)
+                .map(|c| c.visible)
+                .unwrap_or(true);
+
             devices.insert(
                 handle.clone(),
                 RazerDevice {
                     name,
                     handle: handle.clone(),
+                    serial_number: None, // V3 logs don't provide serial numbers
                     battery_percentage: level,
                     is_charging,
                     is_connected: false,
-                    is_selected: !hidden_handles.contains(&handle),
+                    is_selected: is_visible,
                     category: DeviceCategory::Unknown, // V3 logs don't provide category info
                 },
             );
@@ -121,8 +128,24 @@ impl Watcher for SynapseV3Watcher {
         debug: bool,
     ) -> Result<()> {
         let devices = self.parse_devices(&[])?;
+        self.cached_devices = devices.clone();
         log_devices(&devices, debug);
         tray.update_devices(devices, icon_settings)
+    }
+
+    fn parse_and_update_with_settings(
+        &mut self, tray: &mut TrayManager,
+        settings: &mut Settings, debug: bool,
+    ) -> Result<()> {
+        let devices = self.parse_devices(&settings.device_configs)?;
+        self.cached_devices = devices.clone();
+        log_devices(&devices, debug);
+        let icon_settings = settings.to_icon_settings();
+        tray.update_devices(devices, &icon_settings)
+    }
+
+    fn last_devices(&self) -> DeviceMap {
+        self.cached_devices.clone()
     }
 
     fn check_log_rotation(&mut self, _debug: bool) {

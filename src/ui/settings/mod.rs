@@ -1,3 +1,4 @@
+pub mod devices_tab;
 pub mod dialogs;
 pub mod event_handlers;
 pub mod ffi_types;
@@ -23,8 +24,10 @@ impl SettingsWindow {
         add_tabs(tab_control);
         general_tab::create_general_tab(hwnd, &current_settings)?;
         text_tab::create_text_tab(hwnd, &current_settings)?;
+        devices_tab::create_devices_tab(hwnd)?;
         create_ok_button(hwnd)?;
         hide_text_tab_initially(hwnd);
+        hide_devices_tab_initially(hwnd);
 
         let _ = ShowWindow(hwnd, SW_SHOW);
         let _ = windows::Win32::Graphics::Gdi::UpdateWindow(hwnd);
@@ -91,6 +94,8 @@ unsafe fn add_tabs(tab: HWND) {
     SendMessageW(tab, TCM_INSERTITEMW, Some(windows::Win32::Foundation::WPARAM(0)), Some(LPARAM(&tie as *const _ as isize)));
     tie.pszText = windows::core::PWSTR(windows::core::w!("Percentage Text").as_ptr() as *mut u16);
     SendMessageW(tab, TCM_INSERTITEMW, Some(windows::Win32::Foundation::WPARAM(1)), Some(LPARAM(&tie as *const _ as isize)));
+    tie.pszText = windows::core::PWSTR(windows::core::w!("Devices").as_ptr() as *mut u16);
+    SendMessageW(tab, TCM_INSERTITEMW, Some(windows::Win32::Foundation::WPARAM(2)), Some(LPARAM(&tie as *const _ as isize)));
 }
 
 unsafe fn create_ok_button(hwnd: HWND) -> Result<()> {
@@ -105,6 +110,12 @@ unsafe fn create_ok_button(hwnd: HWND) -> Result<()> {
 
 unsafe fn hide_text_tab_initially(hwnd: HWND) {
     for &id in text_tab::TEXT_TAB_IDS {
+        helpers::show_hide_control(hwnd, id, false);
+    }
+}
+
+unsafe fn hide_devices_tab_initially(hwnd: HWND) {
+    for id in devices_tab::devices_tab_ids() {
         helpers::show_hide_control(hwnd, id, false);
     }
 }

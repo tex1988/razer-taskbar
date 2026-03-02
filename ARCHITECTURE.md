@@ -31,12 +31,12 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                   Razer Taskbar (Rust)                           │
 │                                                                   │
-│  ┌────────────────────┐  ┌─────────────────────┐                │
-│  │  Event Loop        │  │  Log Parsers        │                │
-│  │  (engine)          │──│  - watcher_v3       │                │
-│  │                    │  │  - watcher_v4       │                │
-│  │  Polls & dispatches│  │  Regex/JSON parse   │                │
-│  └────────────────────┘  └─────────┬───────────┘                │
+│  ┌────────────────────┐  ┌──────────────────────────┐           │
+│  │  Event Loop        │  │  Log Parsers / Emulation │           │
+│  │  (engine)          │──│  - watcher_v3            │           │
+│  │                    │  │  - watcher_v4            │           │
+│  │  Polls & dispatches│  │  - watcher_emulated      │           │
+│  └────────────────────┘  └─────────┬────────────────┘           │
 │                                    │                             │
 │                                    ▼                             │
 │                          ┌──────────────────┐                    │
@@ -60,10 +60,10 @@
 └─────────────────────────────────┼──────────────────────────────┘
                                   │
                                   ▼
-                    ┌──────────────────────────┐
-                    │  Windows System Tray     │
-                    │  [Battery Icon] 85%      │
-                    └──────────────────────────┘
+                    ┌──────────────────────────────────┐
+                    │  Windows System Tray             │
+                    │  [Mouse 25%] [Keyboard 80%] ...  │
+                    └──────────────────────────────────┘
 ```
 
 ## Data Flow - Synapse V3
@@ -147,6 +147,23 @@
                 └────────────────────┘
 ```
 
+## Data Flow - Emulation Mode
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ engine::watcher_emulated  (--emulate / -e flag)                  │
+├──────────────────────────────────────────────────────────────────┤
+│  Hard-coded EMULATED_DEVICES list (4 fake devices)               │
+│  Each tick: battery % increments/decrements to simulate drain    │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │
+                         ▼ same Watcher trait
+                ┌────────────────────┐
+                │ model::RazerDevice │
+                │ (same as V3/V4)    │
+                └────────────────────┘
+```
+
 ## Event Loop Flow
 
 ```
@@ -158,9 +175,10 @@
       │
       ├─► Step 2: Init assets & theme (engine::icon_manager)
       │
-      ├─► Step 3: Detect Synapse version
-      │   ├─ Check for V4 logs → exists? Use V4
-      │   └─ Otherwise → Use V3
+      ├─► Step 3: Detect watcher
+      │   ├─ --emulate flag? → EmulationWatcher (no Synapse needed)
+      │   ├─ Check for V4 logs → exists? → SynapseV4Watcher
+      │   └─ Otherwise → SynapseV3Watcher
       │
       ├─► Step 4: Create tray icon (ui::TrayManager)
       │
@@ -181,28 +199,48 @@
           │ 4. Poll log file for changes           │
           │    ├─ Check log rotation (V4)          │
           │    ├─ Parse devices                    │
-          │    └─ Update tray icon                 │
+          │    └─ Update tray icons (per device)   │
           └───────────────────────────────────────┘
 ```
 
-## Device Selection Logic
+## Multi-Device Tray Icon Logic
 
 ```
-Multiple Devices Connected:
-┌────────────────────────────────────────────────────────────┐
-│ Device A: Razer Viper (25%, not charging)  → Priority: 25  │
-│ Device B: Razer Naga  (80%, charging)      → Priority: 800 │
-│ Device C: Razer Mamba (15%, not charging)  → Priority: 15  │
-└────────────────────────────────────────────────────────────┘
+Devices returned by watcher:
+┌─────────────────────────────────────────────────────────────┐
+│ Device A: Razer Viper   (25%, not charging, is_selected)    │
+│ Device B: Razer Kraken  (80%, charging,     is_selected)    │
+│ Device C: Razer Mamba   (15%, not charging, NOT selected)   │
+└─────────────────────────────────────────────────────────────┘
                            │
-                           ▼ sort_by_key(battery * if charging {100} else {1})
+                           ▼ filter(is_connected && is_selected), sort by handle
                            │
-┌────────────────────────────────────────────────────────────┐
-│ Sorted Priority:                                           │
-│ 1. Device C: 15% (not charging)  ← SHOW THIS              │
-│ 2. Device A: 25% (not charging)                           │
-│ 3. Device B: 80% (charging)                               │
-└────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ Active devices: [Device A, Device B]                        │
+│ One tray icon created/updated per active device.            │
+│ Device C is hidden (in settings.hidden_device_handles).     │
+└─────────────────────────────────────────────────────────────┘
+                           │
+              ┌────────────┴─────────────┐
+              ▼                          ▼
+   ┌──────────────────┐      ┌──────────────────┐
+   │ TrayIcon A       │      │ TrayIcon B       │
+   │ Razer Viper 25%  │      │ Razer Kraken 80% │
+   └──────────────────┘      └──────────────────┘
+
+No active devices → single fallback icon shown (unknown/no-device).
+```
+
+## Device Visibility — Settings Model
+
+```
+settings.hidden_device_handles: Vec<String>
+  │
+  ├─ Empty → all connected devices are shown (default)
+  └─ Contains handle → that device's tray icon is suppressed
+
+Previously (dev branch): shown_device_handle: String  (single device)
+Now (multi_device branch): hidden_device_handles: Vec<String>  (exclusion list)
 ```
 
 ## Icon Generation Flow
@@ -253,7 +291,7 @@ Battery Percentage: 87%
 ┌─────────────────────────┐
 │ Update Tray             │
 │ set_icon(icon)          │
-│ set_tooltip("87%")      │
+│ set_tooltip("Name 87%") │
 └─────────────────────────┘
 ```
 
@@ -262,7 +300,7 @@ Battery Percentage: 87%
 ```
 src/
 │
-├── main.rs ─────────────────── Entry point, app bootstrap, version detection
+├── main.rs ─────────────────── Entry point, app bootstrap, version/mode detection
 │
 ├── engine/ ─────────────────── Core logic: event loop, watchers, icon generation
 │   ├── mod.rs                  Module declarations & re-exports
@@ -270,6 +308,7 @@ src/
 │   ├── watcher_common.rs       Shared watcher utilities (log_devices)
 │   ├── watcher_v3.rs           Synapse V3 log parser (regex-based)
 │   ├── watcher_v4.rs           Synapse V4 log parser (JSON-based)
+│   ├── watcher_emulated.rs     Fake device watcher for testing (--emulate flag)
 │   └── icon_manager/           Icon loading, theming, and text overlay
 │       ├── mod.rs              Public API: load_icon, load_unknown_icon, LoadIconParams
 │       ├── assets.rs           Embedded & custom asset loading, battery range lookup
@@ -282,6 +321,7 @@ src/
 │   ├── icon_settings.rs        IconSettings, TextOverlayConfig
 │   ├── settings.rs             Settings (JSON persist), IconTheme, TextAlignment,
 │   │                           SynapseVersion, LogFontData
+│   │                           Notable: hidden_device_handles: Vec<String>
 │   └── v4_log_types.rs         LoggedDeviceInfo, PowerStatus, ChargingStatus, NameMap
 │
 ├── ui/ ─────────────────────── User interface: tray, menus, settings window
@@ -289,12 +329,15 @@ src/
 │   ├── constants.rs            UI string constants (menu text, tooltips)
 │   ├── context_menu.rs         Native Win32 popup menu (unused, for reference)
 │   ├── menu_events.rs          MenuAction enum, tray menu event handling
-│   ├── tray_manager.rs         TrayManager: icon updates, menu building, device picking
+│   ├── tray_manager.rs         TrayManager: per-device icon map, fallback icon,
+│   │                           change detection, menu building
 │   └── settings/               Settings dialog (Win32 native)
 │       ├── mod.rs              SettingsWindow::show(), window creation, message loop
 │       ├── state.rs            SettingsWindowState, change detection, save logic
 │       ├── general_tab.rs      General tab controls (theme, assets, polling, autostart)
 │       ├── text_tab.rs         Text tab controls (font, color, alignment, position)
+│       ├── devices_tab.rs      Devices tab: per-device visibility checkboxes,
+│       │                       scrollable panel, disconnect/remove controls
 │       ├── event_handlers.rs   WM_COMMAND/WM_NOTIFY dispatch, checkbox/edit/picker handlers
 │       ├── dialogs.rs          Color picker, font picker, folder browser, FontResult
 │       ├── helpers.rs          Win32 control helpers (checkbox, enable, show/hide, DPI)
@@ -320,15 +363,23 @@ src/
 | `main`    | Bootstrap, CLI args, wiring packages together       | all packages       |
 | `engine`  | Event loop, log parsing, icon generation            | `model`, `ui`, `util` |
 | `model`   | Data structures, settings persistence               | —                  |
-| `ui`      | Tray icon, menus, settings window (Win32)           | `model`, `engine`, `util` |
+| `ui`      | Tray icons (per device), menus, settings window     | `model`, `engine`, `util` |
 | `util`    | Logging, autostart, shared helper functions         | —                  |
 
 ## Key Design Decisions
 
 - **Single Responsibility**: Each package has a clear purpose — `model` for data,
   `engine` for logic, `ui` for presentation, `util` for cross-cutting concerns.
-- **Watcher Trait**: `engine::event_loop::Watcher` abstracts V3/V4 differences
+- **Watcher Trait**: `engine::event_loop::Watcher` abstracts V3/V4/Emulation differences
   behind a common interface, enabling polymorphic dispatch in the event loop.
+- **Multi-Device Tray Icons**: `TrayManager` maintains a `HashMap<String, TrayIcon>`
+  keyed by device handle. One system tray icon is created per visible connected device;
+  icons are created/removed dynamically as devices appear or disappear.
+- **Hidden Devices (Exclusion List)**: `settings.hidden_device_handles: Vec<String>`
+  replaces the old single `shown_device_handle`. Empty = show all; adding a handle
+  suppresses that device's tray icon.
+- **Emulation Mode**: `--emulate` / `-e` flag starts `EmulationWatcher` with four
+  hard-coded fake devices and no dependency on Razer Synapse, useful for UI testing.
 - **Shared Utilities**: Common patterns (`to_wide`, `log_devices`, `compute_point_size`)
   are extracted to avoid duplication across watchers and UI code.
 - **Enum `as_str()` methods**: `IconTheme` and `TextAlignment` provide `as_str()`

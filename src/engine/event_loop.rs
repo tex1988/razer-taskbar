@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use super::icon_manager;
 use crate::util::{log, write_error_log};
-use crate::model::{IconSettings, Settings};
+use crate::model::{DeviceMap, IconSettings, Settings};
 use crate::ui::{TrayManager, MenuAction};
 
 #[cfg(target_os = "windows")]
@@ -21,6 +21,23 @@ pub trait Watcher {
         debug: bool,
     ) -> Result<()>;
 
+    /// Parse and update, passing device_configs for ordering and visibility.
+    fn parse_and_update_with_settings(
+        &mut self,
+        tray: &mut TrayManager,
+        settings: &mut Settings,
+        debug: bool,
+    ) -> Result<()> {
+        self.parse_and_update(tray, &settings.to_icon_settings(), debug)
+    }
+
+    /// Return the last parsed devices for discovery purposes.
+    fn last_devices(&self) -> DeviceMap { DeviceMap::new() }
+
+    /// Whether discovered devices should be persisted to settings.
+    /// Emulation watcher returns false to avoid polluting real config.
+    fn persists_devices(&self) -> bool { true }
+
     fn check_log_rotation(&mut self, debug: bool);
 }
 
@@ -31,8 +48,8 @@ pub fn run_event_loop<W: Watcher>(
     debug: bool,
 ) -> Result<()> {
     write_error_log("Parsing and updating devices...");
-    let icon_settings = settings.to_icon_settings();
-    watcher.parse_and_update(&mut tray, &icon_settings, debug)?;
+    watcher.parse_and_update_with_settings(&mut tray, &mut settings, debug)?;
+    discover_devices(&mut watcher, &mut settings, debug);
     write_error_log("Successfully parsed devices, entering main loop...");
 
     let mut counter: u32 = 0;
@@ -56,17 +73,17 @@ pub fn run_event_loop<W: Watcher>(
             MenuAction::None => {}
         }
 
-        check_system_theme(&settings, &mut tray, &mut watcher, debug)?;
+        check_system_theme(&mut settings, &mut tray, &mut watcher, debug)?;
 
         counter += 1;
         let poll_ticks = (settings.polling_interval_minutes * 60 * 10) as u32;
         if counter >= poll_ticks {
             counter = 0;
             watcher.check_log_rotation(debug);
-            let icon_settings = settings.to_icon_settings();
-            if let Err(e) = watcher.parse_and_update(&mut tray, &icon_settings, debug) {
+            if let Err(e) = watcher.parse_and_update_with_settings(&mut tray, &mut settings, debug) {
                 log(&format!("Error parsing devices: {}", e), debug);
             }
+            discover_devices(&mut watcher, &mut settings, debug);
         }
     }
 
@@ -96,6 +113,8 @@ fn handle_settings_action<W: Watcher>(
             if changed {
                 log("Settings changed, reloading...", debug);
                 *settings = Settings::load()?;
+                // Re-sync device connected state after reload (connected field is not persisted)
+                discover_devices(watcher, settings, debug);
                 apply_settings_change(settings, tray, watcher, debug)?;
             }
         }
@@ -104,7 +123,7 @@ fn handle_settings_action<W: Watcher>(
 }
 
 fn apply_settings_change<W: Watcher>(
-    settings: &Settings,
+    settings: &mut Settings,
     tray: &mut TrayManager,
     watcher: &mut W,
     debug: bool,
@@ -115,11 +134,24 @@ fn apply_settings_change<W: Watcher>(
     icon_manager::set_icon_theme(&theme_str);
 
     tray.force_refresh();
-    let icon_settings = settings.to_icon_settings();
-    if let Err(e) = watcher.parse_and_update(tray, &icon_settings, debug) {
+    if let Err(e) = watcher.parse_and_update_with_settings(tray, settings, debug) {
         log(&format!("Error updating after settings change: {}", e), debug);
     }
     Ok(())
+}
+
+/// Sync device_configs with currently known devices — adds new, marks disconnected.
+fn discover_devices<W: Watcher>(watcher: &mut W, settings: &mut Settings, debug: bool) {
+    if !watcher.persists_devices() { return; }
+    let devices = watcher.last_devices();
+    let discovered: Vec<(String, String)> = devices.values()
+        .filter(|d| d.is_connected)
+        .map(|d| (d.unique_id().to_string(), d.name.clone()))
+        .collect();
+    if settings.sync_device_configs(&discovered) {
+        log(&format!("Device configs synced ({} connected device(s)), saving", discovered.len()), debug);
+        let _ = settings.save();
+    }
 }
 
 fn update_custom_assets(settings: &Settings, debug: bool) {
@@ -134,7 +166,7 @@ fn update_custom_assets(settings: &Settings, debug: bool) {
 }
 
 fn check_system_theme<W: Watcher>(
-    settings: &Settings,
+    settings: &mut Settings,
     tray: &mut TrayManager,
     watcher: &mut W,
     debug: bool,
@@ -149,8 +181,7 @@ fn check_system_theme<W: Watcher>(
     if icon_manager::set_icon_theme("system") {
         log("Resolved theme changed — refreshing icons", debug);
         tray.force_refresh();
-        let icon_settings = settings.to_icon_settings();
-        if let Err(e) = watcher.parse_and_update(tray, &icon_settings, debug) {
+        if let Err(e) = watcher.parse_and_update_with_settings(tray, settings, debug) {
             log(&format!("Error refreshing after system theme change: {}", e), debug);
         }
     }
