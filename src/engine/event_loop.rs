@@ -76,7 +76,8 @@ pub fn run_event_loop<W: Watcher>(
         check_system_theme(&mut settings, &mut tray, &mut watcher, debug)?;
 
         counter += 1;
-        let poll_ticks = (settings.polling_interval_minutes * 60 * 10) as u32;
+        // Event loop ticks every 100ms (10 times per second)
+        let poll_ticks = (settings.polling_interval_total_seconds() * 10) as u32;
         if counter >= poll_ticks {
             counter = 0;
             watcher.check_log_rotation(debug);

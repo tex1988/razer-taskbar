@@ -174,6 +174,9 @@
       ├─► Step 1: Load settings (model::Settings)
       │
       ├─► Step 2: Init assets & theme (engine::icon_manager)
+      │   ├─ Load themes_folder + active_theme from settings
+      │   ├─ Call set_themes_config(themes_root, active_theme)
+      │   └─ Resolve theme assets path or use embedded defaults
       │
       ├─► Step 3: Detect watcher
       │   ├─ --emulate flag? → EmulationWatcher (no Synapse needed)
@@ -185,7 +188,7 @@
       └─► Step 5: Enter event loop (engine::event_loop)
           │
           ┌───────────────────────────────────────┐
-          │ Every polling interval:                │
+          │ Every 100ms tick:                      │
           ├───────────────────────────────────────┤
           │ 1. Pump Windows messages               │
           │                                        │
@@ -196,7 +199,8 @@
           │ 3. Check system theme changes          │
           │    └─ Theme changed? Refresh icons     │
           │                                        │
-          │ 4. Poll log file for changes           │
+          │ 4. Poll log file (every N seconds)     │
+          │    ├─ Counter >= poll_interval_total?  │
           │    ├─ Check log rotation (V4)          │
           │    ├─ Parse devices                    │
           │    └─ Update tray icons (per device)   │
@@ -311,7 +315,8 @@ src/
 │   ├── watcher_emulated.rs     Fake device watcher for testing (--emulate flag)
 │   └── icon_manager/           Icon loading, theming, and text overlay
 │       ├── mod.rs              Public API: load_icon, load_unknown_icon, LoadIconParams
-│       ├── assets.rs           Embedded & custom asset loading, battery range lookup
+│       ├── assets.rs           Theme scanning, embedded & custom asset loading,
+│       │                       set_themes_config(), scan_themes(), default_themes_root()
 │       ├── text_overlay.rs     Percentage text rendering with font & outline
 │       └── theme.rs            Dark/light/system theme detection & switching
 │
@@ -321,7 +326,9 @@ src/
 │   ├── icon_settings.rs        IconSettings, TextOverlayConfig
 │   ├── settings.rs             Settings (JSON persist), IconTheme, TextAlignment,
 │   │                           SynapseVersion, LogFontData
-│   │                           Notable: hidden_device_handles: Vec<String>
+│   │                           Notable: polling_interval_minutes + polling_interval_seconds
+│   │                           themes_folder (root), active_theme (name)
+│   │                           polling_interval_total_seconds() helper
 │   └── v4_log_types.rs         LoggedDeviceInfo, PowerStatus, ChargingStatus, NameMap
 │
 ├── ui/ ─────────────────────── User interface: tray, menus, settings window
@@ -334,11 +341,14 @@ src/
 │   └── settings/               Settings dialog (Win32 native)
 │       ├── mod.rs              SettingsWindow::show(), window creation, message loop
 │       ├── state.rs            SettingsWindowState, change detection, save logic
-│       ├── general_tab.rs      General tab controls (theme, assets, polling, autostart)
+│       ├── general_tab.rs      General tab: theme dropdown, theme folder picker,
+│       │                       dark/light/system radios, device overlay checkbox,
+│       │                       polling interval (minutes + seconds), autostart
 │       ├── text_tab.rs         Text tab controls (font, color, alignment, position)
 │       ├── devices_tab.rs      Devices tab: per-device visibility checkboxes,
 │       │                       scrollable panel, disconnect/remove controls
-│       ├── event_handlers.rs   WM_COMMAND/WM_NOTIFY dispatch, checkbox/edit/picker handlers
+│       ├── event_handlers.rs   WM_COMMAND/WM_NOTIFY dispatch, checkbox/edit/picker handlers,
+│       │                       theme combobox handler, polling interval validation
 │       ├── dialogs.rs          Color picker, font picker, folder browser, FontResult
 │       ├── helpers.rs          Win32 control helpers (checkbox, enable, show/hide, DPI)
 │       └── ffi_types.rs        Raw FFI structs (CHOOSECOLORW, CHOOSEFONTW, LOGFONTW)

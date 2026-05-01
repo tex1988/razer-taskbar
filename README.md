@@ -10,6 +10,8 @@ A lightweight Rust application that displays battery status of Razer wireless de
 ✅ **Real-time monitoring** - Watches log files for battery status changes
 ✅ **System tray icon** - Visual battery indicator in taskbar
 ✅ **Multiple devices** - Shows lowest battery device (non-charging preferred)
+✅ **Custom themes** - Full theming support with custom icon packs
+✅ **Configurable polling** - Set log polling interval with minute and second precision
 
 ## How It Works
 
@@ -66,46 +68,80 @@ The app will:
 
 Settings are stored in: `%LOCALAPPDATA%\razer-taskbar\settings.json`
 
+### Polling Interval
+
+You can configure how often the app checks log files for battery updates in **Settings → General → Log polling interval**. The interval can be set using two inputs:
+- **Minutes**: 0-999
+- **Seconds**: 0-59
+
+The total interval is calculated as `minutes × 60 + seconds` with a minimum of 1 second. Default is 1 minute, 0 seconds.
+
+Examples:
+- `0 min 30 sec` = checks every 30 seconds
+- `1 min 0 sec` = checks every minute (default)
+- `0 min 5 sec` = checks every 5 seconds (faster updates, slightly higher CPU usage)
+
 ## Theming
 
-Razer Taskbar supports fully custom icon sets. You can create your own theme and point the app to it via **Settings → General → Use custom assets**.
+Razer Taskbar supports fully custom icon themes. You can create your own themes or use community-created ones.
 
-### Folder structure
+### Quick Start
 
-A custom assets folder must follow this layout:
+1. Create a `themes/` folder next to `razer-taskbar.exe`
+2. Inside `themes/`, create a folder for your theme (e.g., `themes/MyTheme/`)
+3. Add `dark/` and/or `light/` subfolders with your PNG icons
+4. Open **Settings → General**, select your theme from the dropdown
+5. Click OK to apply
+
+### Theme Structure
+
+A theme folder must follow this layout:
 
 ```
-my-theme/
-├── icon.properties       ← battery-range → filename mapping
-├── dark/                 ← icons used when "Dark" theme is selected
-│   ├── 100.png
-│   ├── 80.png
-│   ├── 60.png
-│   ├── 40.png
-│   ├── 20.png
-│   ├── 5.png
-│   ├── charging.png      ← overlay drawn on top when device is charging
-│   ├── no_device.png     ← shown when no device is detected
-│   ├── mouse.png         ← device type overlay (optional)
-│   ├── keyboard.png      ← device type overlay (optional)
-│   ├── headphones.png    ← device type overlay (optional)
-│   └── unknown.png       ← device type overlay for unrecognised category (optional)
-└── light/                ← icons used when "Light" theme is selected
-    ├── 100.png
-    ├── 80.png
-    ├── 60.png
-    ├── 40.png
-    ├── 20.png
-    ├── 5.png
-    ├── charging.png
-    ├── no_device.png
-    ├── mouse.png
-    ├── keyboard.png
-    ├── headphones.png
-    └── unknown.png
+themes/
+└── MyTheme/                  ← Your theme name
+    ├── icon.properties       ← Battery range → filename mapping
+    ├── dark/                 ← Icons for dark mode
+    │   ├── 100.png
+    │   ├── 80.png
+    │   ├── 60.png
+    │   ├── 40.png
+    │   ├── 20.png
+    │   ├── 5.png
+    │   ├── charging.png      ← Overlay when charging
+    │   ├── no_device.png     ← Shown when no device detected
+    │   ├── mouse.png         ← Device type overlay (optional)
+    │   ├── keyboard.png      ← Device type overlay (optional)
+    │   ├── headphones.png    ← Device type overlay (optional)
+    │   └── unknown.png       ← Device type overlay (optional)
+    └── light/                ← Icons for light mode
+        ├── 100.png
+        ├── 80.png
+        ├── 60.png
+        ├── 40.png
+        ├── 20.png
+        ├── 5.png
+        ├── charging.png
+        ├── no_device.png
+        ├── mouse.png
+        ├── keyboard.png
+        ├── headphones.png
+        └── unknown.png
 ```
 
-> **Note:** Both `dark/` and `light/` subfolders are optional. If a subfolder is missing the app automatically falls back to the built-in embedded assets for that theme.
+> **Note:** Both `dark/` and `light/` subfolders are optional. If a subfolder is missing, the app automatically falls back to built-in embedded assets for that theme.
+
+### Custom Theme Folder
+
+By default, the app scans the `themes/` folder next to the executable. You can specify a different location:
+
+1. Open **Settings → General**
+2. Check **Use custom theme folder**
+3. Click **Browse...** and select your themes root directory
+4. Select a theme from the dropdown
+5. Click OK
+
+The selected folder should contain theme subfolders (e.g., `C:\MyThemes\ThemeA\`, `C:\MyThemes\ThemeB\`).
 
 ### icon.properties
 

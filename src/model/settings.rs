@@ -100,6 +100,7 @@ fn default_text_x() -> i32 { 0 }
 fn default_text_y() -> i32 { 7 }
 fn default_show_percent_symbol() -> bool { false }
 fn default_polling_interval() -> u64 { 10 }
+fn default_polling_interval_seconds() -> u64 { 0 }
 fn default_display_charging() -> bool { true }
 fn default_synapse_version() -> SynapseVersion { SynapseVersion::Auto }
 fn default_show_device_overlay() -> bool { false }
@@ -131,6 +132,8 @@ pub struct Settings {
     pub show_percent_symbol: bool,
     #[serde(default = "default_polling_interval")]
     pub polling_interval_minutes: u64,
+    #[serde(default = "default_polling_interval_seconds")]
+    pub polling_interval_seconds: u64,
     #[serde(default = "default_display_charging")]
     pub display_charging_state: bool,
     #[serde(default)]
@@ -170,6 +173,7 @@ impl Default for Settings {
             percentage_text_y: default_text_y(),
             show_percent_symbol: default_show_percent_symbol(),
             polling_interval_minutes: default_polling_interval(),
+            polling_interval_seconds: default_polling_interval_seconds(),
             display_charging_state: default_display_charging(),
             shown_device_handle: String::new(),
             device_configs: Vec::new(),
@@ -225,6 +229,13 @@ impl Settings {
         let data_dir = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."));
         data_dir.join("razer-taskbar").join("settings.json")
+    }
+
+    /// Calculate total polling interval in seconds (minutes * 60 + seconds).
+    /// Returns at least 1 second.
+    pub fn polling_interval_total_seconds(&self) -> u64 {
+        let total = self.polling_interval_minutes * 60 + self.polling_interval_seconds;
+        total.max(1)
     }
 
     // ── Device config helpers ──────────────────────────────────

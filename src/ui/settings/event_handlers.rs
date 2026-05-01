@@ -207,12 +207,30 @@ unsafe fn handle_browse(hwnd: HWND) {
 }
 
 unsafe fn handle_ok_button(hwnd: HWND) {
-    // Read polling interval
+    // Read polling interval (minutes and seconds)
+    let mut minutes = 0u64;
+    let mut seconds = 0u64;
     if let Some(text) = read_edit_text(hwnd, 1003) {
-        if let Ok(interval) = text.parse::<u64>() {
-            state::with_state(|s| s.polling_interval_minutes = interval.max(1));
+        if let Ok(val) = text.parse::<u64>() {
+            minutes = val;
         }
     }
+    if let Some(text) = read_edit_text(hwnd, 1017) {
+        if let Ok(val) = text.parse::<u64>() {
+            seconds = val;
+        }
+    }
+    // Ensure total is at least 1 second
+    let total_seconds = minutes * 60 + seconds;
+    if total_seconds < 1 {
+        minutes = 1;
+        seconds = 0;
+    }
+    state::with_state(|s| {
+        s.polling_interval_minutes = minutes;
+        s.polling_interval_seconds = seconds;
+    });
+
     // Read themes folder (only if checkbox is checked)
     let use_custom = get_checkbox(hwnd, 1007);
     let folder = if use_custom {

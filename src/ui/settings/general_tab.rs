@@ -5,7 +5,7 @@ use crate::model::Settings;
 use crate::util::to_wide;
 use super::helpers::{set_checkbox, enable_window};
 
-pub const GENERAL_TAB_IDS: &[i32] = &[1014, 1011, 1016, 1012, 1013, 1015, 1007, 1005, 1006, 1010, 1003, 1004];
+pub const GENERAL_TAB_IDS: &[i32] = &[1014, 1011, 1016, 1012, 1013, 1015, 1007, 1005, 1006, 1010, 1003, 1017, 1004];
 
 pub unsafe fn create_general_tab(hwnd: HWND, s: &Settings) -> Result<()> {
     create_device_overlay_checkbox(hwnd, s)?;
@@ -125,14 +125,35 @@ unsafe fn create_custom_assets_controls(hwnd: HWND, s: &Settings) -> Result<()> 
 }
 
 unsafe fn create_polling_controls(hwnd: HWND, s: &Settings) -> Result<()> {
+    // Label
     CreateWindowExW(WINDOW_EX_STYLE::default(), windows::core::w!("STATIC"),
-        windows::core::w!("Log polling interval (minutes):"), WS_VISIBLE | WS_CHILD,
-        30, 236, 250, 20, Some(hwnd), Some(HMENU(1010isize as *mut _)), None, None)?;
-    let edit = CreateWindowExW(WS_EX_CLIENTEDGE, windows::core::w!("EDIT"), windows::core::w!(""),
+        windows::core::w!("Log polling interval:"), WS_VISIBLE | WS_CHILD,
+        30, 236, 150, 20, Some(hwnd), Some(HMENU(1010isize as *mut _)), None, None)?;
+
+    // Minutes input
+    let edit_min = CreateWindowExW(WS_EX_CLIENTEDGE, windows::core::w!("EDIT"), windows::core::w!(""),
         WS_VISIBLE | WS_CHILD | WS_BORDER | WINDOW_STYLE(ES_NUMBER as u32),
-        30, 258, 100, 25, Some(hwnd), Some(HMENU(1003isize as *mut _)), None, None)?;
-    let txt = to_wide(&format!("{}", s.polling_interval_minutes));
-    let _ = SetWindowTextW(edit, windows::core::PCWSTR(txt.as_ptr()));
+        30, 258, 60, 25, Some(hwnd), Some(HMENU(1003isize as *mut _)), None, None)?;
+    let txt_min = to_wide(&format!("{}", s.polling_interval_minutes));
+    let _ = SetWindowTextW(edit_min, windows::core::PCWSTR(txt_min.as_ptr()));
+
+    // "min" label
+    CreateWindowExW(WINDOW_EX_STYLE::default(), windows::core::w!("STATIC"),
+        windows::core::w!("min"), WS_VISIBLE | WS_CHILD,
+        95, 261, 30, 20, Some(hwnd), None, None, None)?;
+
+    // Seconds input
+    let edit_sec = CreateWindowExW(WS_EX_CLIENTEDGE, windows::core::w!("EDIT"), windows::core::w!(""),
+        WS_VISIBLE | WS_CHILD | WS_BORDER | WINDOW_STYLE(ES_NUMBER as u32),
+        130, 258, 60, 25, Some(hwnd), Some(HMENU(1017isize as *mut _)), None, None)?;
+    let txt_sec = to_wide(&format!("{}", s.polling_interval_seconds));
+    let _ = SetWindowTextW(edit_sec, windows::core::PCWSTR(txt_sec.as_ptr()));
+
+    // "sec" label
+    CreateWindowExW(WINDOW_EX_STYLE::default(), windows::core::w!("STATIC"),
+        windows::core::w!("sec"), WS_VISIBLE | WS_CHILD,
+        195, 261, 30, 20, Some(hwnd), None, None, None)?;
+
     Ok(())
 }
 

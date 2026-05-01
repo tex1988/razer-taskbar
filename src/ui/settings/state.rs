@@ -11,6 +11,7 @@ pub struct SettingsWindowState {
     pub percentage_text_y: i32,
     pub show_percent_symbol: bool,
     pub polling_interval_minutes: u64,
+    pub polling_interval_seconds: u64,
     pub run_at_startup: bool,
     /// Whether "Use custom theme folder" checkbox is checked.
     pub use_custom_theme_folder: bool,
@@ -37,6 +38,7 @@ pub fn init_state(s: &Settings) {
         percentage_text_y: s.percentage_text_y,
         show_percent_symbol: s.show_percent_symbol,
         polling_interval_minutes: s.polling_interval_minutes,
+        polling_interval_seconds: s.polling_interval_seconds,
         run_at_startup: s.run_at_startup,
         use_custom_theme_folder: s.themes_folder.is_some(),
         themes_folder: s.themes_folder.clone(),
@@ -70,6 +72,7 @@ pub fn has_changed(original: &Settings) -> bool {
             || s.percentage_text_y != original.percentage_text_y
             || s.show_percent_symbol != original.show_percent_symbol
             || s.polling_interval_minutes != original.polling_interval_minutes
+            || s.polling_interval_seconds != original.polling_interval_seconds
             || s.run_at_startup != original.run_at_startup
             || s.themes_folder != original.themes_folder
             || s.active_theme != original.active_theme
@@ -109,6 +112,7 @@ fn apply_state_to_settings(s: &SettingsWindowState, ns: &mut Settings) {
     ns.percentage_text_y = s.percentage_text_y;
     ns.show_percent_symbol = s.show_percent_symbol;
     ns.polling_interval_minutes = s.polling_interval_minutes;
+    ns.polling_interval_seconds = s.polling_interval_seconds;
     ns.run_at_startup = s.run_at_startup;
     ns.themes_folder = s.themes_folder.clone();
     ns.active_theme = s.active_theme.clone();

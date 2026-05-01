@@ -8,6 +8,8 @@ A complete Rust implementation of the Razer Taskbar app that:
 - ✅ Displays battery status in Windows system tray
 - ✅ Auto-detects which Synapse version you're using
 - ✅ Uses <10MB RAM (vs 150MB for Electron version)
+- ✅ Supports custom themes with icon packs
+- ✅ Configurable polling interval (minutes + seconds)
 
 ## Project Structure
 
