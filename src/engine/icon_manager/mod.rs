@@ -8,7 +8,7 @@ use tray_icon::Icon;
 use crate::model::{DeviceCategory, IconSettings, TextOverlayConfig};
 
 // Re-export public API
-pub use assets::set_custom_assets_folder;
+pub use assets::{set_themes_config, scan_themes, default_themes_root};
 pub use theme::{create_theme_change_listener, consume_system_theme_changed, set_icon_theme};
 
 const UNKNOWN_BATTERY_ICON: &str = "no_device.png";

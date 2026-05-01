@@ -103,6 +103,7 @@ fn default_polling_interval() -> u64 { 10 }
 fn default_display_charging() -> bool { true }
 fn default_synapse_version() -> SynapseVersion { SynapseVersion::Auto }
 fn default_show_device_overlay() -> bool { false }
+fn default_active_theme() -> String { "Default".to_string() }
 
 // ── Settings ───────────────────────────────────────────────────
 
@@ -147,6 +148,12 @@ pub struct Settings {
     pub icon_theme: IconTheme,
     #[serde(default = "default_show_device_overlay")]
     pub show_device_type_overlay: bool,
+    /// Root folder that contains named theme subfolders. None = use folder next to exe.
+    #[serde(default)]
+    pub themes_folder: Option<String>,
+    /// Name of the active custom theme ("Default" = built-in embedded assets).
+    #[serde(default = "default_active_theme")]
+    pub active_theme: String,
 }
 
 impl Default for Settings {
@@ -171,6 +178,8 @@ impl Default for Settings {
             custom_assets_folder: None,
             icon_theme: IconTheme::default(),
             show_device_type_overlay: default_show_device_overlay(),
+            themes_folder: None,
+            active_theme: default_active_theme(),
         }
     }
 }

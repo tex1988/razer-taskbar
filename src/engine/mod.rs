@@ -9,7 +9,8 @@ pub mod watcher_v4;
 pub use event_loop::run_event_loop;
 pub use icon_manager::{
     create_theme_change_listener,
-    set_custom_assets_folder, set_icon_theme,
+    set_icon_theme,
+    set_themes_config, scan_themes, default_themes_root,
 };
 #[cfg(debug_assertions)]
 pub use watcher_emulated::EmulationWatcher;

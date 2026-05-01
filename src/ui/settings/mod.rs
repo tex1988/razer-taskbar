@@ -52,7 +52,7 @@ unsafe fn create_main_window() -> Result<HWND> {
 
     let mut cursor = windows::Win32::Foundation::POINT { x: 0, y: 0 };
     let _ = GetCursorPos(&mut cursor);
-    let (w, h) = (450, 400);
+    let (w, h) = (450, 435);
 
     Ok(CreateWindowExW(
         WINDOW_EX_STYLE::default(), class_name,
@@ -80,7 +80,7 @@ unsafe fn create_tab_control(hwnd: HWND) -> Result<HWND> {
         WINDOW_EX_STYLE::default(),
         windows::core::w!("SysTabControl32"), windows::core::w!(""),
         WS_VISIBLE | WS_CHILD | WINDOW_STYLE(TCS_TABS as u32),
-        10, 10, 420, 310,
+        10, 10, 420, 345,
         Some(hwnd), Some(HMENU(3000isize as *mut _)), None, None,
     )?)
 }
@@ -102,7 +102,7 @@ unsafe fn create_ok_button(hwnd: HWND) -> Result<()> {
     CreateWindowExW(
         WINDOW_EX_STYLE::default(), windows::core::w!("BUTTON"), windows::core::w!("OK"),
         WS_VISIBLE | WS_CHILD | WINDOW_STYLE(BS_DEFPUSHBUTTON as u32),
-        177, 325, 80, 30,
+        177, 360, 80, 30,
         Some(hwnd), Some(HMENU(9001isize as *mut _)), None, None,
     )?;
     Ok(())

@@ -41,6 +41,7 @@ unsafe fn handle_command(hwnd: HWND, wparam: WPARAM) -> LRESULT {
         1012 => set_theme_if_clicked(notif, "dark"),
         1013 => set_theme_if_clicked(notif, "light"),
         1015 => set_theme_if_clicked(notif, "system"),
+        1016 => { if notif == CBN_SELCHANGE { handle_theme_combobox(hwnd); } }
         2003 => { if notif == BN_CLICKED { handle_color_picker(hwnd); } }
         2008 => { if notif == BN_CLICKED { handle_font_picker(hwnd); } }
         2004 => { if notif == CBN_SELCHANGE { handle_alignment(hwnd); } }
@@ -133,7 +134,60 @@ unsafe fn handle_custom_assets_toggle(hwnd: HWND) {
         enable_window(edit, enabled);
         enable_window(btn, enabled);
     }
-    state::with_state(|s| s.use_custom_assets = enabled);
+    // When unchecking, clear the themes_folder in state so "Default" is used
+    state::with_state(|s| {
+        s.use_custom_theme_folder = enabled;
+        if !enabled {
+            s.themes_folder = None;
+        }
+    });
+    // Refresh the combobox to show default themes (next to exe)
+    refresh_theme_combobox(hwnd);
+}
+
+unsafe fn refresh_theme_combobox(hwnd: HWND) {
+    let Ok(combo) = GetDlgItem(Some(hwnd), 1016) else { return };
+    let (themes_folder, active_theme) = state::with_state(|s| {
+        (s.themes_folder.clone(), s.active_theme.clone())
+    }).unwrap_or((None, "Default".to_string()));
+
+    // Determine themes root
+    let themes_root = themes_folder
+        .as_ref()
+        .map(|f| std::path::PathBuf::from(f))
+        .or_else(crate::engine::default_themes_root);
+
+    let themes = themes_root
+        .as_ref()
+        .map(|root| crate::engine::scan_themes(root))
+        .unwrap_or_else(|| vec!["Default".to_string()]);
+
+    // Clear and repopulate
+    SendMessageW(combo, CB_RESETCONTENT, None, None);
+    let mut sel_idx = 0usize;
+    for (i, theme) in themes.iter().enumerate() {
+        let wide = to_wide(theme);
+        SendMessageW(combo, CB_ADDSTRING, None, Some(LPARAM(wide.as_ptr() as isize)));
+        if theme == &active_theme {
+            sel_idx = i;
+        }
+    }
+    SendMessageW(combo, CB_SETCURSEL, Some(WPARAM(sel_idx)), None);
+}
+
+unsafe fn handle_theme_combobox(hwnd: HWND) {
+    let Ok(combo) = GetDlgItem(Some(hwnd), 1016) else { return };
+    let sel = SendMessageW(combo, CB_GETCURSEL, None, None).0;
+    if sel < 0 { return; }
+    // Read the string at selected index
+    let len = SendMessageW(combo, CB_GETLBTEXTLEN, Some(WPARAM(sel as usize)), None).0;
+    if len <= 0 { return; }
+    let mut buf = vec![0u16; (len + 1) as usize];
+    SendMessageW(combo, CB_GETLBTEXT,
+        Some(WPARAM(sel as usize)),
+        Some(LPARAM(buf.as_mut_ptr() as isize)));
+    let name = String::from_utf16_lossy(&buf[..len as usize]);
+    state::with_state(|s| s.active_theme = name);
 }
 
 unsafe fn handle_browse(hwnd: HWND) {
@@ -143,6 +197,12 @@ unsafe fn handle_browse(hwnd: HWND) {
             let t = to_wide(&folder);
             let _ = SetWindowTextW(edit, windows::core::PCWSTR(t.as_ptr()));
         }
+        // Store the new themes folder and refresh the combobox
+        state::with_state(|s| {
+            s.themes_folder = Some(folder);
+            s.active_theme = "Default".to_string();
+        });
+        refresh_theme_combobox(hwnd);
     }
 }
 
@@ -153,12 +213,28 @@ unsafe fn handle_ok_button(hwnd: HWND) {
             state::with_state(|s| s.polling_interval_minutes = interval.max(1));
         }
     }
-    // Read custom assets folder
+    // Read themes folder (only if checkbox is checked)
     let use_custom = get_checkbox(hwnd, 1007);
     let folder = if use_custom {
         read_edit_text(hwnd, 1005).filter(|t| !t.trim().is_empty())
     } else { None };
-    state::with_state(|s| s.custom_assets_folder = folder);
+    state::with_state(|s| s.themes_folder = folder);
+    // Read active theme from combobox (already tracked live via handle_theme_combobox,
+    // but re-read here to be safe in case selection changed without CBN_SELCHANGE)
+    if let Ok(combo) = GetDlgItem(Some(hwnd), 1016) {
+        let sel = SendMessageW(combo, CB_GETCURSEL, None, None).0;
+        if sel >= 0 {
+            let len = SendMessageW(combo, CB_GETLBTEXTLEN, Some(WPARAM(sel as usize)), None).0;
+            if len > 0 {
+                let mut buf = vec![0u16; (len + 1) as usize];
+                SendMessageW(combo, CB_GETLBTEXT,
+                    Some(WPARAM(sel as usize)),
+                    Some(LPARAM(buf.as_mut_ptr() as isize)));
+                let name = String::from_utf16_lossy(&buf[..len as usize]);
+                state::with_state(|s| s.active_theme = name);
+            }
+        }
+    }
     // Read devices tab (visibility)
     devices_tab::read_devices_tab(hwnd);
     let _ = DestroyWindow(hwnd);

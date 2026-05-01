@@ -155,14 +155,14 @@ fn discover_devices<W: Watcher>(watcher: &mut W, settings: &mut Settings, debug:
 }
 
 fn update_custom_assets(settings: &Settings, debug: bool) {
-    if let Some(ref folder_path) = settings.custom_assets_folder {
-        let path = PathBuf::from(folder_path);
-        log(&format!("Setting custom assets folder to: {}", folder_path), debug);
-        icon_manager::set_custom_assets_folder(Some(path));
-    } else {
-        log("Clearing custom assets folder (reverting to embedded)", debug);
-        icon_manager::set_custom_assets_folder(None);
-    }
+    // Determine themes root: explicit setting, then default (next to exe)
+    let themes_root = settings.themes_folder
+        .as_ref()
+        .map(|f| PathBuf::from(f))
+        .or_else(icon_manager::default_themes_root);
+
+    log(&format!("Setting theme to: {}", settings.active_theme), debug);
+    icon_manager::set_themes_config(themes_root, &settings.active_theme);
 }
 
 fn check_system_theme<W: Watcher>(

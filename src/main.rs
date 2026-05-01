@@ -100,12 +100,15 @@ fn run_app() -> Result<()> {
 }
 
 fn init_assets_and_theme(settings: &Settings, debug: bool) {
-    if let Some(ref fp) = settings.custom_assets_folder {
-        engine::set_custom_assets_folder(Some(PathBuf::from(fp)));
-        log(&format!("Custom assets folder set to: {}", fp), debug);
-    } else {
-        engine::set_custom_assets_folder(None);
-    }
+    // Determine themes root: explicit setting, then default (next to exe)
+    let themes_root = settings.themes_folder
+        .as_ref()
+        .map(|f| PathBuf::from(f))
+        .or_else(engine::default_themes_root);
+
+    engine::set_themes_config(themes_root, &settings.active_theme);
+    log(&format!("Theme set to: {}", settings.active_theme), debug);
+
     let theme = settings.icon_theme.as_str();
     engine::set_icon_theme(&theme);
     log(&format!("Icon theme set to: {}", theme), debug);

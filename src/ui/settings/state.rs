@@ -12,8 +12,12 @@ pub struct SettingsWindowState {
     pub show_percent_symbol: bool,
     pub polling_interval_minutes: u64,
     pub run_at_startup: bool,
-    pub use_custom_assets: bool,
-    pub custom_assets_folder: Option<String>,
+    /// Whether "Use custom theme folder" checkbox is checked.
+    pub use_custom_theme_folder: bool,
+    /// Path to the themes root folder (the parent of all theme subfolders).
+    pub themes_folder: Option<String>,
+    /// Name of the active theme (e.g. "Default", "MyTheme").
+    pub active_theme: String,
     pub icon_theme: String,
     pub show_device_type_overlay: bool,
     pub device_configs: Vec<DeviceConfig>,
@@ -34,8 +38,9 @@ pub fn init_state(s: &Settings) {
         show_percent_symbol: s.show_percent_symbol,
         polling_interval_minutes: s.polling_interval_minutes,
         run_at_startup: s.run_at_startup,
-        use_custom_assets: s.custom_assets_folder.is_some(),
-        custom_assets_folder: s.custom_assets_folder.clone(),
+        use_custom_theme_folder: s.themes_folder.is_some(),
+        themes_folder: s.themes_folder.clone(),
+        active_theme: s.active_theme.clone(),
         icon_theme: s.icon_theme.as_str().to_string(),
         show_device_type_overlay: s.show_device_type_overlay,
         device_configs: s.device_configs.clone(),
@@ -66,7 +71,8 @@ pub fn has_changed(original: &Settings) -> bool {
             || s.show_percent_symbol != original.show_percent_symbol
             || s.polling_interval_minutes != original.polling_interval_minutes
             || s.run_at_startup != original.run_at_startup
-            || s.custom_assets_folder != original.custom_assets_folder
+            || s.themes_folder != original.themes_folder
+            || s.active_theme != original.active_theme
             || s.icon_theme != original.icon_theme.as_str()
             || s.show_device_type_overlay != original.show_device_type_overlay
             || s.device_configs != original.device_configs
@@ -104,7 +110,8 @@ fn apply_state_to_settings(s: &SettingsWindowState, ns: &mut Settings) {
     ns.show_percent_symbol = s.show_percent_symbol;
     ns.polling_interval_minutes = s.polling_interval_minutes;
     ns.run_at_startup = s.run_at_startup;
-    ns.custom_assets_folder = s.custom_assets_folder.clone();
+    ns.themes_folder = s.themes_folder.clone();
+    ns.active_theme = s.active_theme.clone();
     ns.icon_theme = match s.icon_theme.as_str() {
         "light" => crate::model::IconTheme::Light,
         "system" => crate::model::IconTheme::System,
