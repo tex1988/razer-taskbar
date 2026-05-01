@@ -61,10 +61,15 @@ fn run_app() -> Result<()> {
     }
 
     write_error_log("Application starting...");
+    util::log_memory_usage("Memory at startup", debug);
+
     let settings = Settings::load()?;
     log(&format!("Settings loaded: {:?}", settings), debug);
+    util::log_memory_usage("Memory after settings load", debug);
 
     init_assets_and_theme(&settings, debug);
+    util::log_memory_usage("Memory after asset/theme init", debug);
+
     engine::create_theme_change_listener();
 
     if let Err(e) = util::startup::set_startup(settings.run_at_startup) {
@@ -74,6 +79,7 @@ fn run_app() -> Result<()> {
     let mut tray = TrayManager::new()?;
     tray.initialize()?;
     log("Tray icon initialized", debug);
+    util::log_memory_usage("Memory after tray init", debug);
 
     #[cfg(debug_assertions)]
     if emulate {

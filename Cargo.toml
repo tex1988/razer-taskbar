@@ -6,13 +6,9 @@ edition = "2021"
 [dependencies]
 # System Tray
 tray-icon = "0.21.3"
-image = "0.25.9"
-imageproc = "0.26.0"
+image = { version = "0.25.9", default-features = false, features = ["png"] }
+imageproc = { version = "0.26.0", default-features = false, features = ["text"] }
 ab_glyph = "0.2"
-
-# File Watching
-notify = "8.2.0"
-notify-debouncer-full = "0.7.0"
 
 # Regex & Parsing
 regex = "1.10"
@@ -24,7 +20,6 @@ lazy_static = "1.4"
 anyhow = "1.0"
 
 # Utilities
-chrono = "0.4"
 dirs = "6.0.0"
 
 # Windows
@@ -41,14 +36,16 @@ windows = { version = "0.62.2", features = [
     "Win32_UI_Shell_Common",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
+    "Win32_System_ProcessStatus",
 ]}
 winreg = "0.55.0"
 
 [profile.release]
 opt-level = "z"     # Optimize for size
-lto = true          # Enable link-time optimization
+lto = "fat"         # Fat LTO for maximum optimization
 codegen-units = 1   # Better optimization
-strip = true        # Strip symbols
+strip = "symbols"   # Strip all symbols
+panic = "abort"     # Remove panic unwinding code
 
 [build-dependencies]
 winres = "0.1.12"
