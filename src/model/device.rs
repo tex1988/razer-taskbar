@@ -61,3 +61,65 @@ impl PartialEq for DeviceConfig {
 
 fn default_visible() -> bool { true }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_device(handle: &str, serial: Option<&str>) -> RazerDevice {
+        RazerDevice {
+            name: "Test Device".into(),
+            handle: handle.into(),
+            serial_number: serial.map(|s| s.into()),
+            battery_percentage: 75,
+            is_charging: false,
+            is_connected: true,
+            is_selected: true,
+            category: DeviceCategory::Mouse,
+        }
+    }
+
+    // ── RazerDevice::unique_id ─────────────────────────────────
+
+    #[test]
+    fn unique_id_prefers_serial_number_when_present() {
+        let d = make_device("handle-123", Some("SN-ABC"));
+        assert_eq!(d.unique_id(), "SN-ABC");
+    }
+
+    #[test]
+    fn unique_id_falls_back_to_handle_when_no_serial() {
+        let d = make_device("handle-123", None);
+        assert_eq!(d.unique_id(), "handle-123");
+    }
+
+    // ── DeviceConfig PartialEq ─────────────────────────────────
+
+    #[test]
+    fn device_config_eq_ignores_connected_field() {
+        let a = DeviceConfig { id: "id1".into(), name: "Mouse".into(), visible: true,  connected: false };
+        let b = DeviceConfig { id: "id1".into(), name: "Mouse".into(), visible: true,  connected: true  };
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn device_config_ne_when_visible_differs() {
+        let a = DeviceConfig { id: "id1".into(), name: "Mouse".into(), visible: true,  connected: false };
+        let b = DeviceConfig { id: "id1".into(), name: "Mouse".into(), visible: false, connected: false };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn device_config_ne_when_name_differs() {
+        let a = DeviceConfig { id: "id1".into(), name: "Mouse".into(),    visible: true, connected: false };
+        let b = DeviceConfig { id: "id1".into(), name: "Keyboard".into(), visible: true, connected: false };
+        assert_ne!(a, b);
+    }
+
+    // ── DeviceCategory default ─────────────────────────────────
+
+    #[test]
+    fn device_category_default_is_unknown() {
+        assert_eq!(DeviceCategory::default(), DeviceCategory::Unknown);
+    }
+}
+

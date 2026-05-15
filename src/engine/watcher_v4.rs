@@ -165,6 +165,142 @@ fn remove_duplicate_no_serial(devices: &mut DeviceMap) {
     }
 }
 
+/// Parse devices from raw Synapse V4 log content.
+/// Exposed for testing without requiring an actual log file.
+pub fn parse_devices_from_str(content: &str, configs: &[DeviceConfig], debug: bool) -> Result<DeviceMap> {
+    let matches: Vec<_> = BATTERY_STATE_REGEX.captures_iter(content).collect();
+    let last_match = match matches.last() {
+        Some(m) => m,
+        None => return Ok(DeviceMap::new()),
+    };
+    let json_str = last_match.name("json").unwrap().as_str();
+    let infos = parse_json(json_str, debug)?;
+    let mut devices = build_device_map(&infos, configs, debug);
+    remove_duplicate_no_serial(&mut devices);
+    Ok(devices)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{DeviceCategory, DeviceConfig};
+
+    // ── Helpers ────────────────────────────────────────────────
+
+    fn single_device_log(serial: &str, level: u8, charging: &str, category: &str) -> String {
+        format!(
+            r#"[2024-01-15 10:30:00.000] [SystrayApp] connectingDeviceData: [{{"serialNumber":"{serial}","hasBattery":true,"deviceContainerId":"CONT1","powerStatus":{{"chargingStatus":"{charging}","level":{level}}},"name":{{"en":"Razer Mouse"}},"productName":{{"en":"Razer Mouse"}},"category":"{category}"}}]"#
+        )
+    }
+
+    // ── parse_devices_from_str ────────────────────────────────
+
+    #[test]
+    fn returns_empty_map_for_empty_log() {
+        let result = parse_devices_from_str("", &[], false).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn returns_empty_map_when_no_connecting_device_data_line() {
+        let result = parse_devices_from_str("[2024] [App] something else: foo", &[], false).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parses_single_device_battery_and_name() {
+        let log = single_device_log("SN-001", 75, "Discharging", "MOUSE");
+        let devices = parse_devices_from_str(&log, &[], false).unwrap();
+        assert_eq!(devices.len(), 1);
+        let dev = devices.get("SN-001").expect("device SN-001 missing");
+        assert_eq!(dev.name, "Razer Mouse");
+        assert_eq!(dev.battery_percentage, 75);
+    }
+
+    #[test]
+    fn parses_charging_status_correctly() {
+        let charging_log = single_device_log("SN-001", 50, "Charging", "MOUSE");
+        let discharging_log = single_device_log("SN-002", 80, "Discharging", "MOUSE");
+
+        let dev_charging = parse_devices_from_str(&charging_log, &[], false).unwrap();
+        assert!(dev_charging["SN-001"].is_charging);
+
+        let dev_dis = parse_devices_from_str(&discharging_log, &[], false).unwrap();
+        assert!(!dev_dis["SN-002"].is_charging);
+    }
+
+    #[test]
+    fn parses_device_category() {
+        let log = single_device_log("SN-001", 75, "Discharging", "MOUSE");
+        let devices = parse_devices_from_str(&log, &[], false).unwrap();
+        assert_eq!(devices["SN-001"].category, DeviceCategory::Mouse);
+    }
+
+    #[test]
+    fn skips_devices_without_battery() {
+        let log = r#"[2024-01-15 10:30:00.000] [App] connectingDeviceData: [{"serialNumber":"SN-NO-BAT","hasBattery":false,"deviceContainerId":"CONT1","name":{"en":"Wired Mouse"},"productName":{"en":"Wired Mouse"},"category":"MOUSE"}]"#;
+        let devices = parse_devices_from_str(log, &[], false).unwrap();
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn uses_last_connecting_device_data_entry() {
+        // Two log lines — only the last one is parsed
+        let log = format!(
+            "{}\n{}",
+            single_device_log("SN-OLD", 10, "Discharging", "MOUSE"),
+            single_device_log("SN-NEW", 90, "Charging", "KEYBOARD"),
+        );
+        let devices = parse_devices_from_str(&log, &[], false).unwrap();
+        assert!(!devices.contains_key("SN-OLD"));
+        assert!(devices.contains_key("SN-NEW"));
+    }
+
+    #[test]
+    fn device_visible_by_default_when_no_config() {
+        let log = single_device_log("SN-001", 75, "Discharging", "MOUSE");
+        let devices = parse_devices_from_str(&log, &[], false).unwrap();
+        assert!(devices["SN-001"].is_selected);
+    }
+
+    #[test]
+    fn device_hidden_when_config_marks_not_visible() {
+        let log = single_device_log("SN-001", 75, "Discharging", "MOUSE");
+        let configs = vec![DeviceConfig { id: "SN-001".into(), name: "Mouse".into(), visible: false, connected: false }];
+        let devices = parse_devices_from_str(&log, &configs, false).unwrap();
+        assert!(!devices["SN-001"].is_selected);
+    }
+
+    // ── remove_duplicate_no_serial ────────────────────────────
+
+    #[test]
+    fn remove_duplicate_no_serial_removes_when_named_dup_exists() {
+        let mut devices = DeviceMap::new();
+        let base = RazerDevice {
+            name: "Razer Mouse".into(), handle: "".into(), serial_number: None,
+            battery_percentage: 75, is_charging: false, is_connected: true,
+            is_selected: true, category: DeviceCategory::Mouse,
+        };
+        devices.insert("NOSERIALNUMBER".into(), RazerDevice { handle: "NOSERIALNUMBER".into(), ..base.clone() });
+        devices.insert("SN-REAL".into(),        RazerDevice { handle: "SN-REAL".into(),        ..base });
+        remove_duplicate_no_serial(&mut devices);
+        assert!(!devices.contains_key("NOSERIALNUMBER"));
+        assert!(devices.contains_key("SN-REAL"));
+    }
+
+    #[test]
+    fn remove_duplicate_no_serial_keeps_when_no_dup() {
+        let mut devices = DeviceMap::new();
+        devices.insert("NOSERIALNUMBER".into(), RazerDevice {
+            name: "Unique Device".into(), handle: "NOSERIALNUMBER".into(), serial_number: None,
+            battery_percentage: 50, is_charging: false, is_connected: true,
+            is_selected: true, category: DeviceCategory::Unknown,
+        });
+        remove_duplicate_no_serial(&mut devices);
+        assert!(devices.contains_key("NOSERIALNUMBER"));
+    }
+}
+
 impl Watcher for SynapseV4Watcher {
     fn parse_and_update(
         &mut self, tray: &mut TrayManager,

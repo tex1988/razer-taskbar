@@ -49,48 +49,171 @@ impl SynapseV3Watcher {
 
     pub fn parse_devices(&self, configs: &[DeviceConfig]) -> Result<DeviceMap> {
         let log_content = fs::read_to_string(&self.log_path)?;
-        let mut devices = DeviceMap::new();
+        parse_log_content(&log_content, configs)
+    }
+}
 
-        // Parse battery state changes
-        let battery_matches = get_last_match_by_handle(&BATTERY_STATE_REGEX, &log_content);
-        for (handle, caps) in battery_matches {
-            let name = caps.name("name").unwrap().as_str().trim().to_string();
-            let level = caps.name("level").unwrap().as_str().parse::<u8>().unwrap_or(0);
-            let is_charging = caps.name("isCharging").unwrap().as_str() != "0";
+/// Parse devices from raw Synapse V3 log content.
+/// Extracted from file I/O so it can be tested with any string input.
+pub fn parse_log_content(content: &str, configs: &[DeviceConfig]) -> Result<DeviceMap> {
+    let mut devices = DeviceMap::new();
 
-            let is_visible = configs.iter()
-                .find(|c| c.id == handle)
-                .map(|c| c.visible)
-                .unwrap_or(true);
+    let battery_matches = get_last_match_by_handle(&BATTERY_STATE_REGEX, content);
+    for (handle, caps) in battery_matches {
+        let name = caps.name("name").unwrap().as_str().trim().to_string();
+        let level = caps.name("level").unwrap().as_str().parse::<u8>().unwrap_or(0);
+        let is_charging = caps.name("isCharging").unwrap().as_str() != "0";
 
-            devices.insert(
-                handle.clone(),
-                RazerDevice {
-                    name,
-                    handle: handle.clone(),
-                    serial_number: None, // V3 logs don't provide serial numbers
-                    battery_percentage: level,
-                    is_charging,
-                    is_connected: false,
-                    is_selected: is_visible,
-                    category: DeviceCategory::Unknown, // V3 logs don't provide category info
-                },
-            );
+        let is_visible = configs.iter()
+            .find(|c| c.id == handle)
+            .map(|c| c.visible)
+            .unwrap_or(true);
+
+        devices.insert(
+            handle.clone(),
+            RazerDevice {
+                name,
+                handle: handle.clone(),
+                serial_number: None,
+                battery_percentage: level,
+                is_charging,
+                is_connected: false,
+                is_selected: is_visible,
+                category: DeviceCategory::Unknown,
+            },
+        );
+    }
+
+    let loaded_matches = get_last_match_by_handle_with_index(&DEVICE_LOADED_REGEX, content);
+    let removed_matches = get_last_match_by_handle_with_index(&DEVICE_REMOVED_REGEX, content);
+
+    for handle in loaded_matches.keys().chain(removed_matches.keys()) {
+        if let Some(device) = devices.get_mut(handle) {
+            let loaded_idx = loaded_matches.get(handle).map(|(idx, _)| *idx).unwrap_or(0);
+            let removed_idx = removed_matches.get(handle).map(|(idx, _)| *idx).unwrap_or(0);
+            device.is_connected = loaded_idx > removed_idx;
         }
+    }
 
-        // Parse connection status
-        let loaded_matches = get_last_match_by_handle_with_index(&DEVICE_LOADED_REGEX, &log_content);
-        let removed_matches = get_last_match_by_handle_with_index(&DEVICE_REMOVED_REGEX, &log_content);
+    Ok(devices)
+}
 
-        for handle in loaded_matches.keys().chain(removed_matches.keys()) {
-            if let Some(device) = devices.get_mut(handle) {
-                let loaded_idx = loaded_matches.get(handle).map(|(idx, _)| *idx).unwrap_or(0);
-                let removed_idx = removed_matches.get(handle).map(|(idx, _)| *idx).unwrap_or(0);
-                device.is_connected = loaded_idx > removed_idx;
-            }
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        Ok(devices)
+    // Minimal log fragments matching the V3 regex patterns.
+    // Each multiline block must start at column 0 for the (?m) anchor.
+    const BATTERY_ONLY: &str = "\
+2024-01-15 10:30:00 INFO [App] _OnBatteryLevelChanged
+  Name: Razer Basilisk V3
+  Handle: 12345
+  Battery: level 75 state 0";
+
+    const CHARGING_LOG: &str = "\
+2024-01-15 10:30:00 INFO [App] _OnBatteryLevelChanged
+  Name: Razer Viper V2
+  Handle: 99999
+  Battery: level 42 state 1";
+
+    // Two loaded events for the same handle (idx 0 and 1 in the loaded iterator)
+    // → loaded_idx=1 > removed_idx=0 (default) → connected
+    const CONNECTED_LOG: &str = "\
+2024-01-15 09:00:00 INFO [App] _OnDeviceLoaded
+  Name: Razer Basilisk V3
+  Handle: 12345
+2024-01-15 09:30:00 INFO [App] _OnDeviceLoaded
+  Name: Razer Basilisk V3
+  Handle: 12345
+2024-01-15 10:30:00 INFO [App] _OnBatteryLevelChanged
+  Name: Razer Basilisk V3
+  Handle: 12345
+  Battery: level 80 state 0";
+
+    #[test]
+    fn returns_empty_map_for_empty_log() {
+        let devices = parse_log_content("", &[]).unwrap();
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn parses_battery_level_and_name() {
+        let devices = parse_log_content(BATTERY_ONLY, &[]).unwrap();
+        let dev = devices.get("12345").expect("device 12345 not found");
+        assert_eq!(dev.battery_percentage, 75);
+        assert_eq!(dev.name, "Razer Basilisk V3");
+        assert_eq!(dev.handle, "12345");
+    }
+
+    #[test]
+    fn device_not_charging_when_state_is_zero() {
+        let devices = parse_log_content(BATTERY_ONLY, &[]).unwrap();
+        assert!(!devices["12345"].is_charging);
+    }
+
+    #[test]
+    fn device_is_charging_when_state_is_nonzero() {
+        let devices = parse_log_content(CHARGING_LOG, &[]).unwrap();
+        assert!(devices["99999"].is_charging);
+    }
+
+    #[test]
+    fn device_not_connected_without_loaded_events() {
+        let devices = parse_log_content(BATTERY_ONLY, &[]).unwrap();
+        assert!(!devices["12345"].is_connected);
+    }
+
+    #[test]
+    fn device_connected_when_loaded_idx_exceeds_removed_idx() {
+        let devices = parse_log_content(CONNECTED_LOG, &[]).unwrap();
+        assert!(devices["12345"].is_connected);
+    }
+
+    #[test]
+    fn only_last_battery_event_per_handle_is_kept() {
+        // Two battery events for the same handle — second value wins
+        let log = "\
+2024-01-15 10:00:00 INFO [App] _OnBatteryLevelChanged
+  Name: Razer Basilisk V3
+  Handle: 12345
+  Battery: level 30 state 0
+2024-01-15 11:00:00 INFO [App] _OnBatteryLevelChanged
+  Name: Razer Basilisk V3
+  Handle: 12345
+  Battery: level 90 state 0";
+        let devices = parse_log_content(log, &[]).unwrap();
+        assert_eq!(devices["12345"].battery_percentage, 90);
+    }
+
+    #[test]
+    fn parses_multiple_different_devices() {
+        let log = "\
+2024-01-15 10:00:00 INFO [App] _OnBatteryLevelChanged
+  Name: Mouse
+  Handle: 11111
+  Battery: level 80 state 0
+2024-01-15 10:01:00 INFO [App] _OnBatteryLevelChanged
+  Name: Keyboard
+  Handle: 22222
+  Battery: level 60 state 0";
+        let devices = parse_log_content(log, &[]).unwrap();
+        assert_eq!(devices.len(), 2);
+        assert_eq!(devices["11111"].battery_percentage, 80);
+        assert_eq!(devices["22222"].battery_percentage, 60);
+    }
+
+    #[test]
+    fn device_hidden_when_config_says_not_visible() {
+        use crate::model::DeviceConfig;
+        let configs = vec![DeviceConfig { id: "12345".into(), name: "Mouse".into(), visible: false, connected: false }];
+        let devices = parse_log_content(BATTERY_ONLY, &configs).unwrap();
+        assert!(!devices["12345"].is_selected);
+    }
+
+    #[test]
+    fn device_visible_when_no_config_entry_exists() {
+        let devices = parse_log_content(BATTERY_ONLY, &[]).unwrap();
+        assert!(devices["12345"].is_selected);
     }
 }
 

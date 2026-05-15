@@ -1,19 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod engine;
-mod model;
-mod ui;
-mod util;
-
 use anyhow::Result;
-use util::{log, write_error_log};
-use model::{Settings, SynapseVersion};
+use razer_taskbar::{engine, util};
+use razer_taskbar::util::{log, write_error_log};
+use razer_taskbar::model::{Settings, SynapseVersion};
 use std::path::PathBuf;
 use std::time::Duration;
-use ui::TrayManager;
-use engine::{SynapseV3Watcher, SynapseV4Watcher};
+use razer_taskbar::ui::TrayManager;
+use razer_taskbar::engine::{SynapseV3Watcher, SynapseV4Watcher};
 #[cfg(debug_assertions)]
-use engine::EmulationWatcher;
+use razer_taskbar::engine::EmulationWatcher;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::AllocConsole;

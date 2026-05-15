@@ -163,3 +163,50 @@ fn load_embedded_asset(filename: &str) -> Result<RgbaImage> {
     Ok(image::load_from_memory(bytes)?.to_rgba8())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_icon_properties_reads_basic_ranges() {
+        let content = "0-20 = low.png\n21-50 = medium.png\n51-100 = high.png";
+        let ranges = parse_icon_properties(content).unwrap();
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(ranges[0].min, 0);
+        assert_eq!(ranges[0].max, 20);
+        assert_eq!(ranges[0].filename, "low.png");
+        assert_eq!(ranges[1].min, 21);
+        assert_eq!(ranges[2].min, 51);
+    }
+
+    #[test]
+    fn parse_icon_properties_ignores_comment_lines() {
+        let content = "# this is a comment\n0-100 = all.png";
+        let ranges = parse_icon_properties(content).unwrap();
+        assert_eq!(ranges.len(), 1);
+    }
+
+    #[test]
+    fn parse_icon_properties_ignores_blank_lines() {
+        let content = "\n\n0-100 = all.png\n\n";
+        let ranges = parse_icon_properties(content).unwrap();
+        assert_eq!(ranges.len(), 1);
+    }
+
+    #[test]
+    fn parse_icon_properties_sorts_by_min_ascending() {
+        let content = "51-100 = high.png\n0-50 = low.png";
+        let ranges = parse_icon_properties(content).unwrap();
+        assert_eq!(ranges[0].min, 0);
+        assert_eq!(ranges[1].min, 51);
+    }
+
+    #[test]
+    fn parse_icon_properties_trims_whitespace_around_values() {
+        let content = "  0 - 100  =  all.png  ";
+        let ranges = parse_icon_properties(content).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].filename, "all.png");
+    }
+}
+

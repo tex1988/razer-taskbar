@@ -225,6 +225,23 @@ impl Settings {
         Ok(())
     }
 
+    /// Load settings from an explicit path. Used in tests and for portable configs.
+    pub fn load_from_path(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let content = fs::read_to_string(path.as_ref())?;
+        Ok(serde_json::from_str(&content)?)
+    }
+
+    /// Save settings to an explicit path. Used in tests and for portable configs.
+    pub fn save_to_path(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let content = serde_json::to_string_pretty(self)?;
+        fs::write(path, content)?;
+        Ok(())
+    }
+
     fn settings_path() -> PathBuf {
         let data_dir = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."));
@@ -289,6 +306,163 @@ impl Settings {
             }
         }
         changed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── polling_interval_total_seconds ─────────────────────────
+
+    #[test]
+    fn polling_interval_combines_minutes_and_seconds() {
+        let mut s = Settings::default();
+        s.polling_interval_minutes = 1;
+        s.polling_interval_seconds = 30;
+        assert_eq!(s.polling_interval_total_seconds(), 90);
+    }
+
+    #[test]
+    fn polling_interval_enforces_minimum_of_one_second() {
+        let mut s = Settings::default();
+        s.polling_interval_minutes = 0;
+        s.polling_interval_seconds = 0;
+        assert_eq!(s.polling_interval_total_seconds(), 1);
+    }
+
+    #[test]
+    fn polling_interval_minutes_only() {
+        let mut s = Settings::default();
+        s.polling_interval_minutes = 5;
+        s.polling_interval_seconds = 0;
+        assert_eq!(s.polling_interval_total_seconds(), 300);
+    }
+
+    #[test]
+    fn polling_interval_seconds_only() {
+        let mut s = Settings::default();
+        s.polling_interval_minutes = 0;
+        s.polling_interval_seconds = 45;
+        assert_eq!(s.polling_interval_total_seconds(), 45);
+    }
+
+    // ── is_device_visible ─────────────────────────────────────
+
+    #[test]
+    fn is_device_visible_returns_true_for_unknown_device() {
+        let s = Settings::default();
+        assert!(s.is_device_visible("unknown-id"));
+    }
+
+    #[test]
+    fn is_device_visible_returns_true_when_config_visible() {
+        let mut s = Settings::default();
+        s.device_configs.push(DeviceConfig { id: "dev1".into(), name: "Mouse".into(), visible: true, connected: true });
+        assert!(s.is_device_visible("dev1"));
+    }
+
+    #[test]
+    fn is_device_visible_returns_false_when_config_hidden() {
+        let mut s = Settings::default();
+        s.device_configs.push(DeviceConfig { id: "dev1".into(), name: "Mouse".into(), visible: false, connected: false });
+        assert!(!s.is_device_visible("dev1"));
+    }
+
+    // ── sync_device_configs ───────────────────────────────────
+
+    #[test]
+    fn sync_adds_new_device_and_reports_changed() {
+        let mut s = Settings::default();
+        let changed = s.sync_device_configs(&[("id1".into(), "Mouse".into())]);
+        assert!(changed);
+        assert_eq!(s.device_configs.len(), 1);
+        assert_eq!(s.device_configs[0].id, "id1");
+        assert!(s.device_configs[0].connected);
+    }
+
+    #[test]
+    fn sync_marks_absent_device_as_disconnected() {
+        let mut s = Settings::default();
+        s.device_configs.push(DeviceConfig { id: "id1".into(), name: "Mouse".into(), visible: true, connected: true });
+        let changed = s.sync_device_configs(&[]);   // no devices present
+        assert!(changed);
+        assert!(!s.device_configs[0].connected);
+    }
+
+    #[test]
+    fn sync_updates_device_name_and_reports_changed() {
+        let mut s = Settings::default();
+        s.device_configs.push(DeviceConfig { id: "id1".into(), name: "Old Name".into(), visible: true, connected: false });
+        let changed = s.sync_device_configs(&[("id1".into(), "New Name".into())]);
+        assert!(changed);
+        assert_eq!(s.device_configs[0].name, "New Name");
+    }
+
+    #[test]
+    fn sync_reports_no_change_when_device_already_connected_with_same_name() {
+        let mut s = Settings::default();
+        s.device_configs.push(DeviceConfig { id: "id1".into(), name: "Mouse".into(), visible: true, connected: true });
+        let changed = s.sync_device_configs(&[("id1".into(), "Mouse".into())]);
+        assert!(!changed);
+    }
+
+    #[test]
+    fn sync_handles_multiple_devices() {
+        let mut s = Settings::default();
+        let changed = s.sync_device_configs(&[
+            ("id1".into(), "Mouse".into()),
+            ("id2".into(), "Keyboard".into()),
+        ]);
+        assert!(changed);
+        assert_eq!(s.device_configs.len(), 2);
+    }
+
+    // ── TextAlignment::as_str ─────────────────────────────────
+
+    #[test]
+    fn text_alignment_as_str_returns_lowercase_name() {
+        assert_eq!(TextAlignment::Left.as_str(),   "left");
+        assert_eq!(TextAlignment::Center.as_str(), "center");
+        assert_eq!(TextAlignment::Right.as_str(),  "right");
+    }
+
+    // ── IconTheme::as_str ─────────────────────────────────────
+
+    #[test]
+    fn icon_theme_as_str_returns_lowercase_name() {
+        assert_eq!(IconTheme::Dark.as_str(),   "dark");
+        assert_eq!(IconTheme::Light.as_str(),  "light");
+        assert_eq!(IconTheme::System.as_str(), "system");
+    }
+
+    // ── Serde roundtrip ───────────────────────────────────────
+
+    #[test]
+    fn settings_serialise_then_deserialise_preserves_values() {
+        let mut s = Settings::default();
+        s.polling_interval_minutes = 3;
+        s.show_percentage = true;
+        s.percentage_text_color = "AABBCC".into();
+        s.active_theme = "MyTheme".into();
+
+        let json = serde_json::to_string(&s).unwrap();
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(loaded.polling_interval_minutes, 3);
+        assert_eq!(loaded.show_percentage, true);
+        assert_eq!(loaded.percentage_text_color, "AABBCC");
+        assert_eq!(loaded.active_theme, "MyTheme");
+    }
+
+    #[test]
+    fn settings_deserialise_applies_defaults_for_missing_fields() {
+        // Minimal JSON — all fields absent should get defaults
+        let json = "{}";
+        let s: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(s.polling_interval_minutes, 10);    // default_polling_interval()
+        assert_eq!(s.active_theme, "Default");
+        assert_eq!(s.show_percentage, false);
     }
 }
 
