@@ -299,6 +299,29 @@ mod tests {
         remove_duplicate_no_serial(&mut devices);
         assert!(devices.contains_key("NOSERIALNUMBER"));
     }
+
+    #[test]
+    fn uses_device_container_id_when_serial_number_absent() {
+        // No serialNumber field in JSON → serial_number is None → key = deviceContainerId
+        let log = r#"[2024-01-15 10:30:00.000] [SystrayApp] connectingDeviceData: [{"hasBattery":true,"deviceContainerId":"CONTAINER-1","powerStatus":{"chargingStatus":"Discharging","level":60},"name":{"en":"Razer Headset"},"productName":{"en":"Razer Headset"},"category":"HEADPHONES"}]"#;
+        let devices = parse_devices_from_str(log, &[], false).unwrap();
+        assert!(devices.contains_key("CONTAINER-1"), "should fall back to deviceContainerId");
+        assert_eq!(devices["CONTAINER-1"].battery_percentage, 60);
+    }
+
+    #[test]
+    fn parse_json_invalid_input_returns_error() {
+        let result = parse_json("not valid json", false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_json_valid_array_returns_device_list() {
+        let json = r#"[{"hasBattery":true,"deviceContainerId":"C1","powerStatus":{"chargingStatus":"Discharging","level":75},"name":{"en":"Mouse"},"productName":{"en":"Mouse"},"category":"MOUSE"}]"#;
+        let infos = parse_json(json, false).unwrap();
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].name.en, "Mouse");
+    }
 }
 
 impl Watcher for SynapseV4Watcher {

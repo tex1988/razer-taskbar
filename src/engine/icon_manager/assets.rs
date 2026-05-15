@@ -208,5 +208,89 @@ mod tests {
         assert_eq!(ranges.len(), 1);
         assert_eq!(ranges[0].filename, "all.png");
     }
+
+    // ── set_themes_config / get_custom_assets_folder ──────────
+
+    #[test]
+    fn set_custom_assets_folder_none_clears_path() {
+        set_custom_assets_folder(None);
+        assert!(get_custom_assets_folder().is_none());
+    }
+
+    #[test]
+    fn set_custom_assets_folder_some_stores_path() {
+        let path = std::path::PathBuf::from(r"C:\fake\assets");
+        set_custom_assets_folder(Some(path.clone()));
+        assert_eq!(get_custom_assets_folder(), Some(path));
+        // reset
+        set_custom_assets_folder(None);
+    }
+
+    #[test]
+    fn set_themes_config_default_theme_resolves_to_none() {
+        let root = std::path::PathBuf::from(r"C:\fake\themes");
+        set_themes_config(Some(root), "Default");
+        assert!(get_custom_assets_folder().is_none());
+    }
+
+    #[test]
+    fn set_themes_config_named_theme_resolves_to_combined_path() {
+        let root = std::path::PathBuf::from(r"C:\fake\themes");
+        set_themes_config(Some(root.clone()), "Neon");
+        assert_eq!(get_custom_assets_folder(), Some(root.join("Neon")));
+        // reset
+        set_custom_assets_folder(None);
+    }
+
+    // ── scan_themes ───────────────────────────────────────────
+
+    #[test]
+    fn scan_themes_always_includes_default() {
+        let tmp = std::env::temp_dir().join("razer_scan_themes_empty_test");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let themes = scan_themes(&tmp);
+        assert_eq!(themes[0], "Default");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_themes_finds_folders_with_dark_subdirectory() {
+        let tmp = std::env::temp_dir().join("razer_scan_themes_dark_test");
+        std::fs::create_dir_all(tmp.join("CoolTheme").join("dark")).unwrap();
+        // folder without dark/light/icon.properties — should be ignored
+        std::fs::create_dir_all(tmp.join("EmptyDir")).unwrap();
+
+        let themes = scan_themes(&tmp);
+        assert!(themes.contains(&"CoolTheme".to_string()));
+        assert!(!themes.contains(&"EmptyDir".to_string()));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_themes_finds_folders_with_icon_properties_file() {
+        let tmp = std::env::temp_dir().join("razer_scan_themes_props_test");
+        let theme_dir = tmp.join("PropTheme");
+        std::fs::create_dir_all(&theme_dir).unwrap();
+        std::fs::write(theme_dir.join(ICON_PROPERTIES_FILENAME), "0-100=all.png").unwrap();
+
+        let themes = scan_themes(&tmp);
+        assert!(themes.contains(&"PropTheme".to_string()));
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // ── find_icon_for_percentage ──────────────────────────────
+
+    #[test]
+    fn find_icon_for_percentage_uses_default_properties() {
+        // Reset to embedded defaults
+        set_custom_assets_folder(None);
+        // Ranges from src/assets/icon.properties: 81-100→100.png, 61-80→80.png, etc.
+        assert_eq!(find_icon_for_percentage(100).unwrap(), "100.png");
+        assert_eq!(find_icon_for_percentage(90).unwrap(), "100.png");
+        assert_eq!(find_icon_for_percentage(80).unwrap(), "80.png");
+        assert_eq!(find_icon_for_percentage(50).unwrap(), "60.png");
+        assert_eq!(find_icon_for_percentage(5).unwrap(), "5.png");
+        assert_eq!(find_icon_for_percentage(0).unwrap(), "5.png");
+    }
 }
 

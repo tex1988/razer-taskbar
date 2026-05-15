@@ -88,3 +88,67 @@ fn detect_system_theme() -> &'static str {
     "dark"
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── set_icon_theme / get_icon_theme ───────────────────────
+
+    #[test]
+    fn set_icon_theme_dark_stores_dark() {
+        set_icon_theme("dark");
+        assert_eq!(get_icon_theme(), "dark");
+    }
+
+    #[test]
+    fn set_icon_theme_light_stores_light() {
+        set_icon_theme("light");
+        assert_eq!(get_icon_theme(), "light");
+        // reset
+        set_icon_theme("dark");
+    }
+
+    #[test]
+    fn set_icon_theme_returns_true_when_theme_changes() {
+        set_icon_theme("dark");
+        let changed = set_icon_theme("light");
+        assert!(changed);
+        set_icon_theme("dark");
+    }
+
+    #[test]
+    fn set_icon_theme_returns_false_when_theme_unchanged() {
+        set_icon_theme("dark");
+        let changed = set_icon_theme("dark");
+        assert!(!changed);
+    }
+
+    // ── consume_system_theme_changed ──────────────────────────
+
+    #[test]
+    fn consume_system_theme_changed_returns_false_when_not_set() {
+        // Consume any pending flag first
+        SYSTEM_THEME_CHANGED.store(false, Ordering::Relaxed);
+        assert!(!consume_system_theme_changed());
+    }
+
+    #[test]
+    fn consume_system_theme_changed_returns_true_then_resets() {
+        SYSTEM_THEME_CHANGED.store(true, Ordering::Relaxed);
+        assert!(consume_system_theme_changed());
+        assert!(!consume_system_theme_changed());
+    }
+
+    #[test]
+    fn set_icon_theme_system_resolves_to_dark_or_light() {
+        // "system" reads the Windows registry — just verify it resolves to a valid theme
+        set_icon_theme("dark"); // ensure a known starting state
+        set_icon_theme("system");
+        let theme = get_icon_theme();
+        assert!(theme == "dark" || theme == "light",
+            "expected 'dark' or 'light', got: {}", theme);
+        // reset
+        set_icon_theme("dark");
+    }
+}
+

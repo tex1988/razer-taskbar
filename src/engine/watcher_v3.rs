@@ -215,6 +215,25 @@ mod tests {
         let devices = parse_log_content(BATTERY_ONLY, &[]).unwrap();
         assert!(devices["12345"].is_selected);
     }
+
+    #[test]
+    fn device_disconnected_when_removed_after_loaded() {
+        // One loaded (idx=0) and one removed (idx=0) for the same handle:
+        // loaded_idx=0 > removed_idx=0 is false → not connected.
+        let log = "\
+2024-01-15 09:00:00 INFO [App] _OnDeviceLoaded
+  Name: Razer Basilisk V3
+  Handle: 12345
+2024-01-15 09:30:00 INFO [App] _OnDeviceRemoved
+  Name: Razer Basilisk V3
+  Handle: 12345
+2024-01-15 10:30:00 INFO [App] _OnBatteryLevelChanged
+  Name: Razer Basilisk V3
+  Handle: 12345
+  Battery: level 80 state 0";
+        let devices = parse_log_content(log, &[]).unwrap();
+        assert!(!devices["12345"].is_connected);
+    }
 }
 
 fn get_last_match_by_handle<'a>(

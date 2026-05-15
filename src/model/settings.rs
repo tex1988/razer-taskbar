@@ -464,5 +464,78 @@ mod tests {
         assert_eq!(s.active_theme, "Default");
         assert_eq!(s.show_percentage, false);
     }
+
+    // ── to_icon_settings ─────────────────────────────────────
+
+    #[test]
+    fn to_icon_settings_maps_all_fields() {
+        let mut s = Settings::default();
+        s.show_percentage = true;
+        s.percentage_text_size = 18;
+        s.percentage_text_color = "FF0000".into();
+        s.percentage_text_font = "Consolas".into();
+        s.percentage_text_align = TextAlignment::Right;
+        s.percentage_text_x = 5;
+        s.percentage_text_y = 3;
+        s.show_percent_symbol = true;
+        s.show_device_type_overlay = true;
+
+        let icon = s.to_icon_settings();
+        assert_eq!(icon.show_percentage, true);
+        assert_eq!(icon.text_size, 18);
+        assert_eq!(icon.text_color, "FF0000");
+        assert_eq!(icon.font_name, "Consolas");
+        assert_eq!(icon.text_align, "right");
+        assert_eq!(icon.text_x, 5);
+        assert_eq!(icon.text_y, 3);
+        assert_eq!(icon.show_percent_symbol, true);
+        assert_eq!(icon.show_device_type_overlay, true);
+    }
+
+    // ── get_device_config ─────────────────────────────────────
+
+    #[test]
+    fn get_device_config_returns_none_for_missing_id() {
+        let s = Settings::default();
+        assert!(s.get_device_config("nonexistent").is_none());
+    }
+
+    #[test]
+    fn get_device_config_returns_matching_entry() {
+        let mut s = Settings::default();
+        s.device_configs.push(DeviceConfig { id: "dev1".into(), name: "Mouse".into(), visible: true, connected: true });
+        let cfg = s.get_device_config("dev1").expect("should find dev1");
+        assert_eq!(cfg.name, "Mouse");
+    }
+
+    // ── Enum defaults ─────────────────────────────────────────
+
+    #[test]
+    fn logfont_data_default_has_expected_values() {
+        let lf = LogFontData::default();
+        assert_eq!(lf.lf_face_name, "Arial");
+        assert_eq!(lf.lf_height, -20);
+        assert_eq!(lf.lf_weight, 400);
+        assert_eq!(lf.lf_italic, 0);
+    }
+
+    #[test]
+    fn text_alignment_default_is_center() {
+        assert_eq!(TextAlignment::default(), TextAlignment::Center);
+    }
+
+    #[test]
+    fn icon_theme_default_is_system() {
+        assert_eq!(IconTheme::default(), IconTheme::System);
+    }
+
+    #[test]
+    fn synapse_version_serde_roundtrip() {
+        for v in [SynapseVersion::Auto, SynapseVersion::V3, SynapseVersion::V4] {
+            let json = serde_json::to_string(&v).unwrap();
+            let back: SynapseVersion = serde_json::from_str(&json).unwrap();
+            assert_eq!(v, back);
+        }
+    }
 }
 

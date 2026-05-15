@@ -9,6 +9,7 @@ use crate::model::{DeviceCategory, IconSettings, TextOverlayConfig};
 
 // Re-export public API
 pub use assets::{set_themes_config, scan_themes, default_themes_root};
+pub(crate) use assets::{get_custom_assets_folder, set_custom_assets_folder};
 pub use theme::{create_theme_change_listener, consume_system_theme_changed, set_icon_theme};
 
 const UNKNOWN_BATTERY_ICON: &str = "no_device.png";
@@ -72,5 +73,51 @@ fn apply_device_overlay(img: &mut RgbaImage, category: DeviceCategory) {
         DeviceCategory::Unknown => DEVICE_OVERLAY_UNKNOWN,
     };
     apply_overlay(img, name);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::RgbaImage;
+
+    fn blank_icon() -> RgbaImage {
+        RgbaImage::new(32, 32)
+    }
+
+    #[test]
+    fn apply_device_overlay_mouse_does_not_panic() {
+        apply_device_overlay(&mut blank_icon(), DeviceCategory::Mouse);
+    }
+
+    #[test]
+    fn apply_device_overlay_keyboard_does_not_panic() {
+        apply_device_overlay(&mut blank_icon(), DeviceCategory::Keyboard);
+    }
+
+    #[test]
+    fn apply_device_overlay_headphones_does_not_panic() {
+        apply_device_overlay(&mut blank_icon(), DeviceCategory::Headphones);
+    }
+
+    #[test]
+    fn apply_device_overlay_unknown_does_not_panic() {
+        apply_device_overlay(&mut blank_icon(), DeviceCategory::Unknown);
+    }
+
+    #[test]
+    fn apply_overlay_missing_asset_does_not_panic() {
+        let mut img = blank_icon();
+        // non-existent asset is silently skipped
+        apply_overlay(&mut img, "does_not_exist.png");
+    }
+
+    #[test]
+    fn load_image_from_assets_returns_ok_for_embedded_asset() {
+        // Ensure we use embedded assets (no custom folder)
+        assets::set_custom_assets_folder(None);
+        // "100.png" is guaranteed to exist in the embedded dark theme
+        let result = assets::load_image_from_assets("100.png");
+        assert!(result.is_ok(), "expected embedded asset to load: {:?}", result.err());
+    }
 }
 

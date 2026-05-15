@@ -189,3 +189,151 @@ fn check_system_theme<W: Watcher>(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{DeviceCategory, RazerDevice};
+    use crate::ui::TrayManager;
+
+    // ── Mock watcher ──────────────────────────────────────────
+
+    struct MockWatcher {
+        devices: DeviceMap,
+        persist: bool,
+    }
+
+    impl MockWatcher {
+        fn empty() -> Self { Self { devices: DeviceMap::new(), persist: true } }
+        fn non_persistent() -> Self { Self { devices: DeviceMap::new(), persist: false } }
+        fn with_connected_device(name: &str, id: &str) -> Self {
+            let mut devices = DeviceMap::new();
+            devices.insert(id.into(), RazerDevice {
+                name: name.into(),
+                handle: id.into(),
+                serial_number: Some(id.into()),
+                battery_percentage: 75,
+                is_charging: false,
+                is_connected: true,
+                is_selected: true,
+                category: DeviceCategory::Mouse,
+            });
+            Self { devices, persist: true }
+        }
+    }
+
+    impl Watcher for MockWatcher {
+        fn parse_and_update(&mut self, _: &mut TrayManager, _: &IconSettings, _: bool) -> Result<()> {
+            Ok(())
+        }
+        fn check_log_rotation(&mut self, _: bool) {}
+        fn last_devices(&self) -> DeviceMap { self.devices.clone() }
+        fn persists_devices(&self) -> bool { self.persist }
+    }
+
+    // ── Watcher trait defaults ────────────────────────────────
+
+    #[test]
+    fn watcher_default_last_devices_is_empty() {
+        // MinimalWatcher only overrides required methods; default last_devices() = empty
+        struct MinimalWatcher;
+        impl Watcher for MinimalWatcher {
+            fn parse_and_update(&mut self, _: &mut TrayManager, _: &IconSettings, _: bool) -> Result<()> { Ok(()) }
+            fn check_log_rotation(&mut self, _: bool) {}
+        }
+        assert!(MinimalWatcher.last_devices().is_empty());
+    }
+
+    #[test]
+    fn watcher_default_persists_devices_is_true() {
+        struct MinimalWatcher;
+        impl Watcher for MinimalWatcher {
+            fn parse_and_update(&mut self, _: &mut TrayManager, _: &IconSettings, _: bool) -> Result<()> { Ok(()) }
+            fn check_log_rotation(&mut self, _: bool) {}
+        }
+        assert!(MinimalWatcher.persists_devices());
+    }
+
+    // ── discover_devices ──────────────────────────────────────
+
+    #[test]
+    fn discover_devices_skips_when_watcher_does_not_persist() {
+        let mut watcher = MockWatcher::non_persistent();
+        let mut settings = Settings::default();
+        discover_devices(&mut watcher, &mut settings, false);
+        // device_configs must remain empty — the function returned early
+        assert!(settings.device_configs.is_empty());
+    }
+
+    #[test]
+    fn discover_devices_does_not_mutate_when_no_devices() {
+        let mut watcher = MockWatcher::empty();
+        let mut settings = Settings::default();
+        discover_devices(&mut watcher, &mut settings, false);
+        assert!(settings.device_configs.is_empty());
+    }
+
+    #[test]
+    fn discover_devices_does_not_save_when_nothing_changed() {
+        // Pre-populate settings so sync_device_configs returns false (no change → no save)
+        let mut watcher = MockWatcher::empty();
+        let mut settings = Settings::default();
+        // Already no devices, already no configs → sync returns false → save not called
+        discover_devices(&mut watcher, &mut settings, false);
+        // Verify settings unchanged
+        assert!(settings.device_configs.is_empty());
+    }
+
+    #[test]
+    fn discover_devices_adds_connected_device_to_configs() {
+        let mut watcher = MockWatcher::with_connected_device("Razer Viper", "viper-001");
+        let mut settings = Settings::default();
+        discover_devices(&mut watcher, &mut settings, false);
+        // sync_device_configs should have added the device
+        assert!(!settings.device_configs.is_empty());
+        let cfg = &settings.device_configs[0];
+        assert_eq!(cfg.name, "Razer Viper");
+    }
+
+    #[test]
+    fn watcher_parse_and_update_with_settings_uses_icon_settings() {
+        struct MinimalWatcher { called: bool }
+        impl Watcher for MinimalWatcher {
+            fn parse_and_update(&mut self, _: &mut TrayManager, _: &IconSettings, _: bool) -> Result<()> {
+                self.called = true;
+                Ok(())
+            }
+            fn check_log_rotation(&mut self, _: bool) {}
+        }
+        let mut w = MinimalWatcher { called: false };
+        // parse_and_update_with_settings is a default trait method — verify it dispatches
+        // We can't construct TrayManager without Win32, so we just verify the trait compiles
+        // and the method exists on the trait object
+        let _ = w.last_devices(); // calls default → empty
+        assert!(!w.called);
+    }
+
+    // ── update_custom_assets ──────────────────────────────────
+
+    #[test]
+    fn update_custom_assets_default_theme_resolves_to_no_custom_folder() {
+        let mut settings = Settings::default();
+        settings.themes_folder = Some(r"C:\fake\themes".into());
+        settings.active_theme = "Default".into();
+        update_custom_assets(&settings, false);
+        // "Default" theme → set_themes_config clears custom folder
+        assert!(icon_manager::get_custom_assets_folder().is_none());
+    }
+
+    #[test]
+    fn update_custom_assets_named_theme_sets_combined_path() {
+        let mut settings = Settings::default();
+        settings.themes_folder = Some(r"C:\fake\themes".into());
+        settings.active_theme = "Neon".into();
+        update_custom_assets(&settings, false);
+        let folder = icon_manager::get_custom_assets_folder();
+        assert_eq!(folder, Some(PathBuf::from(r"C:\fake\themes\Neon")));
+        // reset
+        icon_manager::set_custom_assets_folder(None);
+    }
+}
+

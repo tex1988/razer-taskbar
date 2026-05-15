@@ -38,3 +38,44 @@ impl From<&IconSettings> for TextOverlayConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_icon_settings() -> IconSettings {
+        IconSettings {
+            show_percentage: true,
+            text_size: 24,
+            text_color: "FF0000".into(),
+            font_name: "Consolas".into(),
+            text_align: "left".into(),
+            text_x: 3,
+            text_y: 7,
+            show_percent_symbol: true,
+            show_device_type_overlay: false,
+        }
+    }
+
+    #[test]
+    fn from_copies_all_text_overlay_fields() {
+        let icon = sample_icon_settings();
+        let overlay = TextOverlayConfig::from(&icon);
+        assert_eq!(overlay.text_size, 24);
+        assert_eq!(overlay.text_color, "FF0000");
+        assert_eq!(overlay.font_name, "Consolas");
+        assert_eq!(overlay.text_align, "left");
+        assert_eq!(overlay.text_x, 3);
+        assert_eq!(overlay.text_y, 7);
+        assert_eq!(overlay.show_percent_symbol, true);
+    }
+
+    #[test]
+    fn icon_settings_partial_eq_reflects_field_values() {
+        let a = sample_icon_settings();
+        let mut b = sample_icon_settings();
+        assert_eq!(a, b);
+        b.text_size = 99;
+        assert_ne!(a, b);
+    }
+}
+

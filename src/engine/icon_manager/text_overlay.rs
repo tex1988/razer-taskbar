@@ -92,3 +92,97 @@ fn build_font_path(filename: &str) -> String {
     else { format!("C:\\Windows\\Fonts\\{}", filename) }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::TextOverlayConfig;
+
+    fn make_config(align: &str, offset_x: i32, offset_y: i32) -> TextOverlayConfig {
+        TextOverlayConfig {
+            text_size: 16,
+            text_color: "FFFFFF".into(),
+            font_name: "Arial".into(),
+            text_align: align.into(),
+            text_x: offset_x,
+            text_y: offset_y,
+            show_percent_symbol: false,
+        }
+    }
+
+    // ── format_percentage_text ────────────────────────────────
+
+    #[test]
+    fn format_text_without_symbol_returns_number_only() {
+        assert_eq!(format_percentage_text(75, false), "75");
+        assert_eq!(format_percentage_text(0, false),  "0");
+        assert_eq!(format_percentage_text(100, false), "100");
+    }
+
+    #[test]
+    fn format_text_with_symbol_appends_percent() {
+        assert_eq!(format_percentage_text(75, true),  "75%");
+        assert_eq!(format_percentage_text(0, true),   "0%");
+        assert_eq!(format_percentage_text(100, true), "100%");
+    }
+
+    // ── compute_text_position ─────────────────────────────────
+
+    #[test]
+    fn compute_position_left_align_starts_at_zero_plus_offset() {
+        let (x, y) = compute_text_position("left", 10.0, 2, 5);
+        assert_eq!(x, 0 + 2);
+        assert_eq!(y, 5);
+    }
+
+    #[test]
+    fn compute_position_right_align_places_text_at_right_edge() {
+        // icon width = 32, text_width = 10 → base_x = 32 - 10 = 22
+        let (x, _) = compute_text_position("right", 10.0, 0, 0);
+        assert_eq!(x, 22);
+    }
+
+    #[test]
+    fn compute_position_right_align_applies_offset() {
+        let (x, y) = compute_text_position("right", 10.0, 3, 7);
+        assert_eq!(x, 22 + 3);
+        assert_eq!(y, 7);
+    }
+
+    #[test]
+    fn compute_position_center_align_centers_text() {
+        // icon=32, text_w=8 → base_x = (32/2 - 8/2) = 12
+        let (x, _) = compute_text_position("center", 8.0, 0, 0);
+        assert_eq!(x, 12);
+    }
+
+    #[test]
+    fn compute_position_unknown_align_acts_as_center() {
+        let (x, _) = compute_text_position("unknown", 8.0, 0, 0);
+        // falls through to the `_` branch which is center
+        assert_eq!(x, 12);
+    }
+
+    #[test]
+    fn compute_position_right_clamps_to_zero_when_text_wider_than_icon() {
+        // text_w > 32 → (32 - text_w).max(0) = 0
+        let (x, _) = compute_text_position("right", 40.0, 0, 0);
+        assert_eq!(x, 0);
+    }
+
+    // ── build_font_path ───────────────────────────────────────
+
+    #[test]
+    fn build_font_path_absolute_path_is_unchanged() {
+        let abs = r"C:\Windows\Fonts\Arial.ttf";
+        assert_eq!(build_font_path(abs), abs);
+    }
+
+    #[test]
+    fn build_font_path_relative_name_gets_windows_fonts_prefix() {
+        assert_eq!(
+            build_font_path("Arial.ttf"),
+            r"C:\Windows\Fonts\Arial.ttf"
+        );
+    }
+}
+

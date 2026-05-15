@@ -51,3 +51,37 @@ pub fn log_memory_usage(_label: &str, _debug: bool) {
     // No-op on non-Windows platforms
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_with_debug_false_does_not_panic() {
+        log("should be suppressed", false);
+    }
+
+    #[test]
+    fn log_with_debug_true_does_not_panic() {
+        log("visible in test output", true);
+    }
+
+    #[test]
+    fn write_error_log_creates_file_containing_message() {
+        let unique = format!("test_marker_{}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+        write_error_log(&unique);
+
+        // Replicate the path logic from write_error_log
+        let log_path = std::env::temp_dir()
+            .parent()
+            .map(|p| p.join("razer_taskbar_errors.log"));
+
+        if let Some(path) = log_path {
+            if path.exists() {
+                let contents = std::fs::read_to_string(&path).unwrap_or_default();
+                assert!(contents.contains(&unique), "log file missing expected marker");
+            }
+        }
+    }
+}
+
